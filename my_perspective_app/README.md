@@ -60,8 +60,8 @@ This is a **multi-mode image preview and annotation application based on PySide6
 
    * **None**: View-only
    * **Perspective Transformation**: Drag points for precise perspective correction
-   * **SAM2 Segmentation Mask**: Placeholder for future implementation
-   * **Perspective Regression based on SAM2 Masks**: Placeholder
+   * **SAM2 Segmentation Mask**: Import checkpoints to sam2/checkpoints to use this function
+   * **Perspective Regression based on SAM2 Masks**: Import checkpoints to sam2/checkpoints to use this function
 4. **Perspective/Shape Transformations**
 5. **Zoom & Canvas Height Adjustments**
 6. **Caching Mode**
