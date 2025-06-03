@@ -1,0 +1,57 @@
+---
+
+## **`folder_selector.py.txt`**
+
+**文件路径**: `my_perspective_app/views/folder_selector.py`
+
+### 1. 概述
+
+`FolderSelector` 用于让用户选择并展示**目标文件夹**：  
+- 显示一个文件夹图标和当前选中的文件夹路径；  
+- 提供一个按钮`“更改目标文件夹”`，点击后弹出对话框让用户重新选文件夹；  
+- 发射 `folder_selected(str)` 信号通知外部控制器（如 `MainController`）进行后续操作。
+
+### 2. 类与方法
+
+#### **`class FolderSelector(QWidget)`**
+
+**信号**:
+```python
+folder_selected = Signal(str)
+```
+- 当用户选定或更改文件夹后，发出此信号，携带新路径。
+
+**成员**:
+- `self._target_folder`: 字符串，当前选择的文件夹；  
+- `self.icon_label`: 显示文件夹图标（来自 `"resources/icons/folder_icon.png"`）  
+- `self.name_label`: 显示当前文件夹路径（初始为“未选择”）  
+- `self.btn_browse`: 按钮，点击后 `_on_browse_clicked()`。
+
+---
+
+##### `__init__(self, parent=None)`
+- **作用**:  
+  1. 初始化 `_target_folder` 为空字符串；  
+  2. 创建 `icon_label`, `name_label`, `btn_browse` 并布局在一个横向 `QHBoxLayout`；  
+  3. 将 `btn_browse.clicked` 连接到 `_on_browse_clicked` 事件。
+
+---
+
+##### `_on_browse_clicked(self)`
+- **作用**:  
+  1. 调 `QFileDialog.getExistingDirectory(...)`，让用户选目标文件夹；  
+  2. 若用户选定 => 更新 `self._target_folder` 和 `name_label`；  
+  3. 发射 `folder_selected(folder_path)` 信号，以通知外部控制器。  
+
+---
+
+##### `get_target_folder(self) -> str`
+- **作用**: 返回当前 `_target_folder`；供外界查询。
+
+---
+
+### 3. 使用场景
+
+- 多用于主窗口顶部或菜单栏下，以便用户切换目标文件夹；  
+- `MainController` 通常会监听 `folder_selected(str)` 来更新程序逻辑（如自动加载文件夹、处理同步等）。
+

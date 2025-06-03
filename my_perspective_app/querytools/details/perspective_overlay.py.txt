@@ -1,0 +1,77 @@
+---
+
+## 5. **`perspective_overlay.py.txt`**
+
+**文件路径**: `my_perspective_app/views/overlays/perspective_overlay.py`
+
+### 1. 概述
+
+`PerspectiveOverlay` 用于**绘制和管理“透视变形”**的交互。它内含：
+
+1. 一个 `ShapeTransformController` 处理角点/中点拖拽；  
+2. 在 `paint_overlay` 中绘制角点、连线和中点；  
+3. 接管 `mouse_press/move/release_event`，在拖拽结束时发射 `overlay_params_changed_signal("perspective", coords_4)`。
+
+### 2. 类与方法
+
+#### **`class PerspectiveOverlay(QObject)`**
+
+**信号**:
+```python
+overlay_params_changed_signal = Signal(str, object)
+```
+- 当用户操作完后更新了角点坐标，则发射 `(overlay_type, data)`，如 `("perspective", coords_4)`。
+
+**主要成员**:
+- `self.image_item`: 当前对应的 `ImageItem`；  
+- `self.shape_controller`: 一个 `ShapeTransformController`，指向同一个 `image_item`。
+
+---
+
+##### `__init__(self, image_item)`
+- **作用**: 保存 `image_item` 并创建 `ShapeTransformController(image_item)`。
+
+---
+
+##### `set_image_item(self, image_item)`
+- **作用**: 切换到新的图像数据；`shape_controller.set_image_item(image_item)` 同步。
+
+---
+
+##### `paint_overlay(self, painter: QPainter, scaled_w: int, scaled_h: int)`
+- **作用**: 在 `PreviewLabel.paintEvent` 的最后阶段被调用，用于绘制：  
+  - **连线**(edges) => 用红色或自定义颜色；  
+  - **4个角点**(CornerPoint) => 十字准星，并根据 `userFixed/systemFixed` 显示不同颜色；  
+  - **4个中点**(MidPoint) => 圆点，也根据固定状态显示不同颜色。
+
+---
+
+### **鼠标事件**：
+
+##### `mouse_press_event(self, label_widget, event)`
+- **作用**:  
+  1. 若左键 => 调 `shape_controller.on_mouse_press`，传入 `(event.pos(), event.button(), label_widget.width(), label_widget.height())`；  
+  2. 若右键 => 调 `shape_controller.get_context_menu_info(...)` 获取可执行动作 => 显示 `QMenu` 让用户选。  
+
+---
+
+##### `mouse_move_event(self, label_widget, event)`
+- **作用**:  
+  1. 若左键正拖拽 => `shape_controller.on_mouse_move(...)`；  
+  2. 重绘 `label_widget.update()`。
+
+---
+
+##### `mouse_release_event(self, label_widget, event)`
+- **作用**:  
+  1. 调 `shape_controller.on_mouse_release(...)`；  
+  2. 如果有坐标更新 => `coords_4 = self.shape_controller.image_item.get_coords_in_label_order()` => `overlay_params_changed_signal.emit("perspective", coords_4)`。
+
+---
+
+### 3. 使用场景
+
+- 被 `PreviewLabel` 在 `set_overlay()` 时注入为 `current_overlay`；  
+- 处理“透视角点/中点拖拽”，并发射“perspective”相关更新；  
+- 与 `PreviewController` 配合，后者监听 `overlay_params_changed_signal("perspective", coords)` 来写入 `_verified.txt`。
+

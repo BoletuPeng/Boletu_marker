@@ -1,0 +1,60 @@
+---
+
+## **`side_panel.py.txt`**
+
+**文件路径**: `my_perspective_app/views/side_panel.py`
+
+### 1. 概述
+
+`SidePanel` 是应用右侧的一个小面板，包含若干滑动条（Slider）和标签（Label），以展示和控制一些参数设置。例如：
+
+- **线条颜色**（示例为 R 分量）  
+- **线条粗细**  
+- **画布高度**（像素）
+
+同时它会发射 `canvas_height_changed(int)` 信号，供外部（如 `MainController`）监听并更新预览时的画布高度。
+
+### 2. 类与方法
+
+#### **`class SidePanel(QWidget)`**
+
+**信号**:  
+```python
+canvas_height_changed = Signal(int)
+```
+- 当用户在滑动条上拖动或改变“画布高度”时，向外发射该信号，并携带新的整数值。
+
+---
+
+##### `__init__(self, parent=None)`
+- **作用**:  
+  1. 创建并配置三个滑动条：  
+     - `slider_color`: 控制示例的颜色 R 分量（0～255）。  
+     - `slider_thickness`: 控制线条粗细（1～10）。  
+     - `slider_canvas_height`: 画布目标高度（500～4000）。  
+  2. 将它们及对应的标签（`QLabel`）加入布局（`QVBoxLayout`）；  
+  3. 将 `slider_canvas_height.valueChanged` 连接到 `_on_canvas_height_changed`，以便在用户滑动时发射 `canvas_height_changed` 信号；  
+  4. 在布局底部加 `layout.addStretch()` 让其它控件保持靠上。
+
+---
+
+##### `_on_canvas_height_changed(self, new_val)`
+- **作用**: 当用户拖动“画布高度”滑动条时，发射 `canvas_height_changed(new_val)` 信号以通知外部控制器更新画布高度。
+
+---
+
+##### `set_canvas_height(self, val: int)`
+- **作用**: 供外部调用（如 `MainController`) 来直接设置滑动条的值，以保持 UI 与设置同步。
+
+---
+
+##### `get_canvas_height(self) -> int`
+- **作用**: 返回当前滑动条的值，可在需要时获取最新的像素高度。
+
+---
+
+### 3. 使用场景
+
+- 侧边栏可随着项目需要扩展更多 sliders、下拉框、或其他配置项；  
+- 典型用法：`MainController` 监听 `canvas_height_changed(int)`，在回调中更新 `PreviewController`；或在程序启动时调用 `set_canvas_height(...)` 来同步外部设置值。
+

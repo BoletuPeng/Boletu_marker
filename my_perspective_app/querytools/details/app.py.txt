@@ -1,0 +1,36 @@
+---
+
+## **`app.py.txt`**
+
+**文件路径**: `my_perspective_app/app.py`
+
+### 1. 概述
+
+`app.py` 定义了**主应用类** `MyPerspectiveApp`，继承自 `QMainWindow`，用来封装整个UI框架：  
+- 内部包含一个 `MainWindow`（见 `views/main_window.py`）作为 central widget；  
+- 创建并持有 `MainController`（见 `controllers/main_controller.py`）来执行各种功能（加载文件夹、监听菜单动作等）。
+
+### 2. 类与方法
+
+#### **`class MyPerspectiveApp(QMainWindow)`**
+
+---
+
+##### `__init__(self, parent=None)`
+- **作用**:  
+  1. 调用 `QMainWindow` 父类构造；  
+  2. 创建 `MainWindow` 实例（UI 视图层对象），并将其设置为 `setCentralWidget(...)`；  
+  3. 创建 `MainController`，将 `self.main_window` 传入构造，以便管理其内部控件和菜单。  
+  4. 设置主窗口标题 (`"Perspective Parameter Editor"`) 和大小 (1280x720)。  
+- **主要成员**:  
+  - `self.main_window`: 一个 `MainWindow` 实例；  
+  - `self.controller`: 一个 `MainController` 实例。
+
+---
+
+### 3. 使用场景
+
+- 当 `main.py` 中执行 `MyPerspectiveApp()` 时，会初始化完整的界面结构：  
+  - `QMainWindow` => `MainWindow` (centralWidget) => 包含菜单栏、预览区、侧边栏等；  
+  - `MainController` 负责联动 UI 组件与业务逻辑（加载文件、同步、退出弹框等）。
+

@@ -1,0 +1,116 @@
+---
+
+## 4. **`preview_widget.py.txt`**
+
+**文件路径**: `my_perspective_app/views/preview_widget.py`
+
+### 1. 概述
+
+`PreviewWidget` 是**预览区**的**顶层容器**，内部包含：
+
+1. **`PreviewLabel`**：显示图像，并可设置一个“Overlay”（如 `PerspectiveOverlay`）来处理形变绘制或其他功能；  
+2. **若干按钮** (上一张 / 下一张 / 下拉框选择不同 overlay 模式 / “保存(仅透视)” 按钮)；  
+3. **`ThumbnailBar`** (底部缩略图)；  
+4. **对外信号**:  
+   - `overlay_params_changed_signal(overlay_type, data)`：当 overlay 变化时（如用户拖拽了角点），发射给外部；  
+   - `file_dropped(paths)`：用户拖拽文件进来；  
+   - `request_previous` / `request_next`：翻页操作；
+
+### 2. 类与主要方法
+
+#### **`class PreviewLabel(QLabel)`**
+
+- **功能**:  
+  - 加载原图(`.load_image`)并可滚轮缩放 (`scale_factor`)；  
+  - 若设 `current_overlay`，则在 `paintEvent` 中调用其 `paint_overlay(...)` 并转发 `mousePressEvent`/`mouseMoveEvent`/`mouseReleaseEvent`；  
+  - 不再关心具体的“透视参数”逻辑，全部由 overlay 完成。
+
+---
+
+##### `load_image(self, image_path)`
+- 读取图片，记下 `original_width/height`，重置 `scale_factor=1.0`，并 `_update_size()`。
+
+---
+
+##### `set_overlay(self, overlay)`
+- 切换/关闭 overlay 对象 (`None` 表示无标记)。
+
+---
+
+##### `paintEvent(self, event)`
+- 如果 `original_pixmap` 存在，则先绘制按 `scale_factor` 缩放后的图，再 `current_overlay.paint_overlay(painter, scaled_w, scaled_h)`（若 overlay 不为None）。
+
+---
+
+##### `mousePressEvent / mouseMoveEvent / mouseReleaseEvent`
+- 若 `current_overlay` 存在，则调用 `current_overlay.mouse_xxx_event(...)`；否则默认处理。
+
+---
+
+##### `wheelEvent(self, event)`
+- 进行缩放因子 `scale_factor` ± 10%，并 `_update_size()` 重绘。
+
+---
+
+#### **`class PreviewWidget(QWidget)`**
+
+- **功能**:  
+  1. 包含一个 `QScrollArea` 装 `PreviewLabel`；  
+  2. 底部 `ThumbnailBar`；  
+  3. 中间有若干按钮 + 下拉框选择 overlay 模式；  
+  4. 发射 `overlay_params_changed_signal(overlay_type, data)`、`file_dropped(...)`、`request_previous`, `request_next`。
+
+---
+
+##### `__init__(self, parent=None)`
+- **作用**:  
+  1. `QScrollArea` + `PreviewLabel`；  
+  2. 上方按钮布局(上一张/下一张/下拉框 + “保存(仅透视)”)；  
+  3. 底部 `ThumbnailBar`；  
+  4. 设置 `dragEnterEvent`/`dropEvent` 来接受外部文件；  
+  5. 连接 `btn_prev` => `request_previous`，`btn_next` => `request_next`；  
+  6. `overlay_mode_selector` => `_on_overlay_mode_changed`；  
+  7. `btn_save` => `_on_save_clicked`；  
+  8. 当 overlay 内部参数变动时 => `_on_overlay_params_changed` => 发射 `overlay_params_changed_signal(...)`。
+
+---
+
+##### `display_image(self, image_item, canvas_height=1000)`
+- **作用**:  
+  1. 让 `preview_label.load_image(image_item.image_path)`；  
+  2. 根据 `canvas_height` 初步计算 scale_factor；  
+  3. 如果当前 overlay_mode = "perspective"，给 `perspective_overlay` 传入 `image_item`；  
+  4. 其他 overlay_mode 类似处理；  
+  5. `preview_label.update()`。
+
+---
+
+##### `_on_overlay_mode_changed(self, index)`
+- **作用**:  
+  1. 读取下拉框的 `userData`；  
+  2. 若 = "perspective" => 创建/显示 `PerspectiveOverlay`；  
+  3. 若 = "none" => `preview_label.set_overlay(None)`；  
+  4. 启用或禁用 “保存(仅透视)” 按钮。  
+
+---
+
+##### `_on_save_clicked(self)`
+- **作用**: 当用户点击“保存(仅透视)”按钮时，若当前模式=“perspective”，向外发射 `overlay_params_changed_signal("perspective-save", coords)`。
+
+---
+
+##### `_on_overlay_params_changed(self, overlay_type, data)`
+- **作用**: 接收 `PerspectiveOverlay` 等 overlay 的坐标更新后转发（在这里是 `self.overlay_params_changed_signal.emit(overlay_type, data)`），让 `PreviewController` 处理写文件等逻辑。
+
+---
+
+##### `dragEnterEvent / dropEvent`
+- **作用**: 用户直接拖拽图片 => 发射 `file_dropped(paths)`。
+
+---
+
+### 3. 用法
+
+- 由 `MainWindow` 放在界面中；  
+- `PreviewController` 监听 `thumbnail_bar` 事件 => 调用 `display_image(...)`；  
+- Overlay 切换与“保存(仅透视)”按钮都在此控件里完成。

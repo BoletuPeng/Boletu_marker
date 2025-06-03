@@ -1,0 +1,1115 @@
+
+
+preview_widget.py 代码文件内容如下：
+
+# my_perspective_app/views/preview_widget.py
+
+from PySide6.QtWidgets import (
+    QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
+    QScrollArea
+)
+from PySide6.QtCore import Signal, Qt, QMimeData, QPoint
+from PySide6.QtGui import (
+    QPixmap, QPainter, QPen, QColor,
+    QDragEnterEvent, QDropEvent, QWheelEvent, QMouseEvent
+)
+
+from models.transform_params import TransformParams
+from controllers.shape_transform_controller import ShapeTransformController
+from .thumbnail_bar import ThumbnailBar
+
+class PreviewLabel(QLabel):
+    """
+    自定义 QLabel:
+      - 这样我们可以在同一个坐标体系内绘图像 + 透视线。
+      - 并且鼠标/滚轮事件都能与缩放后的图像坐标精确对应。
+      - 不再手动在 paintEvent 里绘制“原图 + 4顶点”。
+      - 现在仍有“缩放因子”逻辑，但 corners/midpoints 的绘制由 shape_controller 提供信息。
+    """
+
+    params_changed_signal = Signal(list)  # 保持原先接口，必要时可在 corners 拖动后发射
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignCenter)
+
+        # 原图(未缩放)的存储
+        self.original_pixmap = None
+
+        # 控制是否显示形变框
+        self.params_overlay_visible = False
+
+        # 新增：ShapeTransformController。实际实例会由外部注入
+        # 正在拖动哪一个顶点(None表示未拖动)
+        self.shape_controller = None
+
+        # 给自己一个灰色背景，方便看出边界
+        self.setStyleSheet("background-color: #444; color: white;")
+        self.setMinimumSize(400, 300)
+
+        # 用于记录当前图的原尺寸
+        self.original_width = 0
+        self.original_height = 0
+
+    def set_shape_controller(self, controller):
+        self.shape_controller = controller
+    # -------------- 对外API --------------
+    def load_image(self, image_path: str):
+        if image_path:
+            self.original_pixmap = QPixmap(image_path)
+            self.original_width = self.original_pixmap.width()
+            self.original_height = self.original_pixmap.height()
+        else:
+            self.original_pixmap = None
+            self.original_width = 0
+            self.original_height = 0
+
+        self.scale_factor = 1.0
+        self._update_size()
+        self.update()
+
+    def _update_size(self):
+        """
+        根据 original_width/height 和 scale_factor，重新设置 label 的大小
+        """
+        scaled_w = int(self.original_width * self.scale_factor)
+        scaled_h = int(self.original_height * self.scale_factor)
+        # 让 label 的 size 变成这个，这样 scroll_area 可滚动
+        if scaled_w < 1:
+            scaled_w = 1
+        if scaled_h < 1:
+            scaled_h = 1
+        self.resize(scaled_w, scaled_h)
+
+    def set_params_overlay_visible(self, visible: bool):
+        """显示或隐藏形变参数线框"""
+        self.params_overlay_visible = visible
+        self.update()
+
+    # -------------- 核心绘制 --------------
+    def paintEvent(self, event):
+        """
+        先手动绘制 scaled_pixmap，然后(若 overlay_visible)再叠加四点和连线。
+        """
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        if self.original_pixmap:
+            # 1) 根据 scale_factor 计算图像的绘制尺寸
+            scaled_w = int(self.original_width * self.scale_factor)
+            scaled_h = int(self.original_height * self.scale_factor)
+
+            # 2) 将原图缩放成 scaled_pixmap
+            scaled_pixmap = self.original_pixmap.scaled(
+                scaled_w, scaled_h,
+                Qt.KeepAspectRatio,     # 保持宽高比
+                Qt.SmoothTransformation # 平滑缩放
+            )
+            # 3) 画到左上角(0,0)，或你可居中也行
+            painter.drawPixmap(0, 0, scaled_pixmap)
+
+            # 4) 如果要画线，则在其上叠加
+            if self.params_overlay_visible and self.shape_controller:
+                # 获取绘制信息
+                info = self.shape_controller.get_drawing_info(scaled_w, scaled_h)
+
+                # 画 edges
+                pen_line = QPen(QColor(200, 60, 60), 2)
+                painter.setPen(pen_line)
+                for (x1, y1, x2, y2) in info["edges"]:
+                    painter.drawLine(x1, y1, x2, y2)
+
+                # 画 corners
+                for corner in info["corners"]:
+                    px = corner.x_rel * scaled_w
+                    py = corner.y_rel * scaled_h
+                    cross_half = 6
+                    if corner.userFixed:
+                        color = QColor(40, 130, 255)
+                    elif corner.systemFixed:
+                        color = QColor(180, 180, 180)
+                    else:
+                        color = QColor(0, 220, 0)
+                    pen_corner = QPen(color, 2)
+                    painter.setPen(pen_corner)
+                    painter.drawLine(px - cross_half, py, px + cross_half, py)
+                    painter.drawLine(px, py - cross_half, px, py + cross_half)
+                    # label文字
+                    painter.drawText(px + 8, py - 8, str(corner.label))
+
+                # 画 midpoints
+                for m in info["midpoints"]:
+                    mx = m.x_rel * scaled_w
+                    my = m.y_rel * scaled_h
+                    if m.userFixed:
+                        color = QColor(255, 120, 0)
+                    elif m.systemFixed:
+                        color = QColor(160, 160, 160)
+                    else:
+                        color = QColor(0, 200, 255)
+                    pen_mid = QPen(color, 2)
+                    painter.setPen(pen_mid)
+                    radius = 5
+                    painter.drawEllipse(mx - radius, my - radius, radius*2, radius*2)
+
+        else:
+            painter.drawText(self.rect(), Qt.AlignCenter, "无图片")
+
+        painter.end()
+
+    # -------------- 鼠标事件 --------------
+    def mousePressEvent(self, event: QMouseEvent):
+        if self.shape_controller and self.params_overlay_visible:
+            self.shape_controller.on_mouse_press(event.pos(), event.button())
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self.shape_controller and self.params_overlay_visible:
+            self.shape_controller.on_mouse_move(event.pos())
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if self.shape_controller and self.params_overlay_visible:
+            self.shape_controller.on_mouse_release(event.button())
+            # 在这里可触发 params_changed_signal，如果希望外部捕捉
+            # 先简单发射4个角的坐标
+            if self.shape_controller.image_item:
+                coords_4 = self.shape_controller.image_item.get_coords_in_label_order()
+                self.params_changed_signal.emit(coords_4)
+        super().mouseReleaseEvent(event)
+    # -------------- 滚轮事件 --------------
+    def wheelEvent(self, event: QWheelEvent):
+        """
+        滚轮缩放：原图 和 形变参数 同步变化
+        """
+        # 滚轮缩放比例，可自行调整
+        if event.angleDelta().y() > 0:
+            # 滚轮向上 => 放大
+            self.scale_factor *= 1.1
+        else:
+            # 滚轮向下 => 缩小
+            self.scale_factor /= 1.1
+            if self.scale_factor < 0.1:
+                self.scale_factor = 0.1
+
+        # 每次滚轮都更新 label 大小
+        self._update_size()
+        self.update()
+        event.accept()
+
+    def reset_scale_factor(self):
+        self.scale_factor = 1.0
+        self._update_size()
+        self.update()
+
+class PreviewWidget(QWidget):
+    """
+    上层容器，包含：
+      - PreviewLabel(用于绘制图+形变框)
+      - 按钮区域(上一张/下一张/加载隐藏参数/储存)
+      - 缩略图栏(ThumbnailBar)
+      - 拖拽文件处理
+      - 发射对外的信号
+    """
+
+    request_previous = Signal()
+    request_next = Signal()
+    toggle_params_signal = Signal()
+    params_changed_signal = Signal(list)
+    save_verified_signal = Signal(list)
+    file_dropped = Signal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setMinimumSize(600, 400)
+
+        # 1) 改：用 QScrollArea 来装 PreviewLabel
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setWidgetResizable(False)
+        # 注意：如果你想让scroll_area自动调大小，就设为 True，但这里我们想要出现滚动条
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+
+        self.preview_label = PreviewLabel(self.scroll_area)
+        self.scroll_area.setWidget(self.preview_label)
+
+        # 2) 按钮区域
+        self.btn_prev = QPushButton("上一张")
+        self.btn_next = QPushButton("下一张")
+        self.btn_toggle_params = QPushButton("加载透视变形参数")
+        self.btn_save = QPushButton("储存人工校准坐标")
+        self.btn_save.setEnabled(False)
+
+        # 信号连接
+        self.btn_prev.clicked.connect(self.request_previous)
+        self.btn_next.clicked.connect(self.request_next)
+        self.btn_toggle_params.clicked.connect(self._on_toggle_params_clicked)
+        self.btn_save.clicked.connect(self._on_save_clicked)
+
+        # 3) 缩略图条
+        self.thumbnail_bar = ThumbnailBar(self)
+
+        # 4) 布局
+        main_layout = QVBoxLayout(self)
+        self.setLayout(main_layout)
+
+        # 放入 scroll_area 而不是直接放 preview_label
+        main_layout.addWidget(self.scroll_area, stretch=1)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addWidget(self.btn_prev)
+        btn_layout.addWidget(self.btn_next)
+        btn_layout.addWidget(self.btn_toggle_params)
+        btn_layout.addWidget(self.btn_save)
+        main_layout.addLayout(btn_layout)
+
+        main_layout.addWidget(self.thumbnail_bar, stretch=0)
+
+        # 监听 label 发来的"params_changed_signal"信号 => 启用保存按钮 & 向外发射
+        self.preview_label.params_changed_signal.connect(self._on_label_params_changed)
+
+        # 记录当前 overlay 是否显示
+        self.params_overlay_visible = False
+
+        # 用于管理每张图片的 corners/midpoints
+        self.shape_controller = None
+
+    def set_shape_controller(self, controller):
+        """
+        外部(PreviewController)会创建并传入 ShapeTransformController
+        """
+        self.shape_controller = controller
+        self.preview_label.set_shape_controller(controller)
+
+    # ------------------- 对外方法 -------------------
+
+    def display_image(self, image_item, transform_params, canvas_height=1000):
+        """给 PreviewController 调用，用于显示指定图片(或清空)和透视参数"""
+        if not image_item:
+            self.preview_label.load_image(None)
+            self.preview_label.reset_scale_factor()
+            return
+
+        # 加载原图
+        self.preview_label.load_image(image_item.image_path)
+
+        # 根据 transform_params 里的4点 => 覆盖 image_item 的 corners
+        # 不变更 userFixed/systemFixed
+        image_item.set_corners_from_coords(transform_params.coords)
+
+        # 让 shape_controller 当前指向这个 image_item
+        if self.shape_controller:
+            self.shape_controller.set_image_item(image_item)
+
+        # 计算缩放
+
+        # -- 关键部分：根据 canvas_height 来设定一个初始缩放 --
+        orig_h = self.preview_label.original_height
+        if orig_h > 0:
+            new_scale = canvas_height / orig_h
+            # 如果不想放太大, 就做个限制
+            if new_scale > 10.0:
+                new_scale = 10.0
+            # 也可以做个最小限制
+            if new_scale < 0.1:
+                new_scale = 0.1
+
+            self.preview_label.scale_factor = new_scale
+            self.preview_label._update_size()
+        else:
+            # 没图或图高0 => 就复位
+            self.preview_label.reset_scale_factor()
+
+        self.preview_label.updateGeometry()
+
+        # 重置按钮
+        self.params_overlay_visible = False
+        self.btn_toggle_params.setText("加载透视变形参数")
+        self.btn_save.setEnabled(False)
+
+    def set_params_overlay_visible(self, visible):
+        """显示/隐藏透视线框"""
+        self.params_overlay_visible = visible
+        self.preview_label.set_params_overlay_visible(visible)
+        if visible:
+            self.btn_toggle_params.setText("隐藏透视变形参数")
+        else:
+            self.btn_toggle_params.setText("加载透视变形参数")
+
+    # ------------------- 按钮事件 -------------------
+
+    def _on_toggle_params_clicked(self):
+        self.params_overlay_visible = not self.params_overlay_visible
+        self.set_params_overlay_visible(self.params_overlay_visible)
+        # 保持和原设计兼容 => 向外发射 signal
+        self.toggle_params_signal.emit()
+
+    def _on_save_clicked(self):
+        # 只保存 4 角点
+        if self.shape_controller and self.shape_controller.image_item:
+            coords = self.shape_controller.image_item.get_coords_in_label_order()
+            self.save_verified_signal.emit(coords)
+
+    def _on_label_params_changed(self, coords):
+        """当 Label 上的坐标被拖动时 => 保存按钮可用 + 向外发射"""
+        self.btn_save.setEnabled(True)
+        self.params_changed_signal.emit(coords)
+
+    # ------------------- 拖拽事件 -------------------
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dropEvent(self, event: QDropEvent):
+        urls = event.mimeData().urls()
+        paths = [u.toLocalFile() for u in urls]
+        self.file_dropped.emit(paths)
+        event.acceptProposedAction()
+        super().dropEvent(event)
+
+
+
+
+preview_controller.py 代码文件内容如下：
+
+# my_perspective_app/controllers/preview_controller.py
+
+import os
+from models.transform_params import TransformParams
+from models.image_item import ImageItem
+from PySide6.QtWidgets import QWidget
+
+from controllers.shape_transform_controller import ShapeTransformController
+
+class PreviewController:
+    """
+    PreviewController 负责将 ResourceManager 中的图片显示到 PreviewWidget，
+    并管理缩略图的交互（点击、右键移除等）。
+    """
+    def __init__(self, preview_widget, resource_manager):
+        """
+        :param preview_widget: 预览的 UI 对象 (PreviewWidget)
+        :param resource_manager: 全局的资源管理器 (ResourceManager)
+        """
+        self.current_canvas_height = 600  # 一个默认初始值
+
+        self.preview_widget = preview_widget
+        self.resource_manager = resource_manager
+        
+        # 当前在“已加载区”中的索引
+        self.current_index = 0
+        
+        # 连接缩略图事件
+        self.preview_widget.thumbnail_bar.thumbnail_clicked.connect(self.on_thumbnail_clicked)
+        self.preview_widget.thumbnail_bar.thumbnail_removed.connect(self.on_thumbnail_removed)
+        
+        # 连接翻页按钮（如有的话），或在 preview_widget 中还有 signal
+        self.preview_widget.request_previous.connect(self.show_previous_image)
+        self.preview_widget.request_next.connect(self.show_next_image)
+        
+        # 监听加载/隐藏透视变形参数的按钮
+        self.preview_widget.toggle_params_signal.connect(self.toggle_params_overlay)
+        
+        # 监听拖拽更新坐标
+        self.preview_widget.params_changed_signal.connect(self.on_params_changed)
+        
+        # 监听保存按钮
+        self.preview_widget.save_verified_signal.connect(self.save_verified_params)
+        
+        # 监听拖拽进来的文件
+        self.preview_widget.file_dropped.connect(self.on_file_dropped)
+        
+        # 是否显示透视变形参数
+        self.params_visible = False
+
+        # 创建 shape_controller 并绑定到 preview_widget
+        self.shape_controller = ShapeTransformController(None, self.preview_widget.preview_label)
+        self.preview_widget.set_shape_controller(self.shape_controller)
+
+    def set_canvas_height(self, height):
+        """由 MainController 或其他地方调用，以更新当前预期的画布高度。"""
+        self.current_canvas_height = height
+
+    def refresh_thumbnails_and_display(self):
+        """
+        当“已加载区”更新（ResourceManager 里有新的或移除的图片）时，
+        调用此函数刷新缩略图并显示当前图片。
+        """
+        # 如果 current_index 越界（比如移除了图片），重置为 0
+        if self.current_index >= self.resource_manager.count():
+            self.current_index = 0
+
+        # 获取已加载的所有图片
+        image_items = self.resource_manager.get_all_images()
+        
+        # 若列表为空，则清空预览并返回
+        if not image_items:
+            self.preview_widget.thumbnail_bar.set_thumbnails([])
+            self.preview_widget.display_image(None, None)
+            return
+        
+        # 构建图片路径列表，交给 thumbnail_bar
+        all_paths = [item.image_path for item in image_items]
+        self.preview_widget.thumbnail_bar.set_thumbnails(all_paths)
+        
+        # 先高亮当前 index
+        self.preview_widget.thumbnail_bar.set_current_index(self.current_index)
+        
+        # 显示当前索引对应的图片
+        self._display_image(self.current_index)
+
+    def on_thumbnail_clicked(self, index):
+        """
+        当用户在缩略图上左键点击某张图片时，切换当前预览到该图片。
+        """
+        self.current_index = index
+        self._display_image(index)
+        # 再次更新红框
+        self.preview_widget.thumbnail_bar.set_current_index(self.current_index)
+
+    def on_thumbnail_removed(self, index):
+        """
+        当用户在缩略图上右键菜单选择“移除”时，删除该图片并刷新。
+        """
+        self.resource_manager.remove_image(index)
+        # 如果移除的 index < current_index，会影响当前索引，需要适当修正
+        if index < self.current_index:
+            self.current_index -= 1
+        self.refresh_thumbnails_and_display()
+
+    def _display_image(self, index):
+        image_items = self.resource_manager.get_all_images()
+        if index < 0 or index >= len(image_items):
+            return
+        
+        image_item = image_items[index]
+
+        # 新逻辑：尝试一次性加载 verified/_verified.txt 或 .txt
+        loaded_params = TransformParams.load_for_image(image_item.image_path)
+        
+        # 把加载到的 coords 存进 image_item.verified_coords
+        image_item.verified_coords = loaded_params.coords
+
+        # 让 PreviewWidget 显示这张图片 + 这些坐标
+        # 注意：display_image() 里第二个参数是 TransformParams 实例
+        # 我们直接用 loaded_params
+        self.preview_widget.display_image(image_item, loaded_params, canvas_height=self.current_canvas_height)
+        
+        # 如果之前是显示“隐藏透视参数”，保持当前状态
+        self.preview_widget.set_params_overlay_visible(self.params_visible)
+
+    def show_previous_image(self):
+        """
+        点击‘上一张’按钮时：切换到前一张图片。
+        """
+        if self.resource_manager.count() == 0:
+            return
+        self.current_index = max(0, self.current_index - 1)
+        self._display_image(self.current_index)
+        self.preview_widget.thumbnail_bar.set_current_index(self.current_index)
+
+    def show_next_image(self):
+        """
+        点击‘下一张’按钮时：切换到下一张图片。
+        """
+        if self.resource_manager.count() == 0:
+            return
+        self.current_index = min(self.resource_manager.count() - 1, self.current_index + 1)
+        self._display_image(self.current_index)
+        self.preview_widget.thumbnail_bar.set_current_index(self.current_index)
+
+    def toggle_params_overlay(self):
+        """
+        显示/隐藏透视变形参数。
+        """
+        self.params_visible = not self.params_visible
+        self.preview_widget.set_params_overlay_visible(self.params_visible)
+
+    def on_params_changed(self, new_params):
+        """
+        当用户拖动顶点更新透视坐标后触发。
+        new_params: [(x1, y1), (x2, y2), (x3, y3), (x4, y4)]
+        """
+        image_items = self.resource_manager.get_all_images()
+        if not image_items or self.current_index < 0 or self.current_index >= len(image_items):
+            return
+        
+        current_image = image_items[self.current_index]
+        
+        # 把新的坐标记到内存
+        current_image.verified_coords = new_params
+
+        # ---- 立即写入 _verified.txt (可选) ----
+        base, _ = os.path.splitext(current_image.image_path)
+        verified_path = base + "_verified.txt"
+        TransformParams.save_to_file(verified_path, new_params)
+        # ---------------------------------------
+
+    def save_verified_params(self, new_params):
+        """
+        将用户手动修正后的坐标写入同名 `_verified.txt` 文件。
+        """
+        image_items = self.resource_manager.get_all_images()
+        if not image_items:
+            return
+        
+        current_image = image_items[self.current_index]
+        base, _ = os.path.splitext(current_image.image_path)
+        verified_path = base + "_verified.txt"
+        # 写入
+        from models.transform_params import TransformParams
+        TransformParams.save_to_file(verified_path, new_params)
+
+    def on_file_dropped(self, paths):
+        """
+        当用户在 PreviewWidget 中拖拽文件进来时，添加到已加载区并刷新。
+        """
+        self.resource_manager.add_images(paths)
+        self.refresh_thumbnails_and_display()
+
+
+
+
+shape_transform_controller.py 代码文件内容如下：
+
+# my_perspective_app/controllers/shape_transform_controller.py
+
+from PySide6.QtWidgets import QMenu
+from PySide6.QtCore import QPointF, Qt
+
+from models.shape_transform import (
+    update_system_fixed_states,
+    recalc_midpoint_positions,
+    rebuild_midpoints_by_label_order
+)
+
+class ShapeTransformController:
+    """
+    负责管理 PreviewLabel 上对 corner / midpoint 的鼠标交互 & 右键菜单等；
+    此版本严格复刻 Demo 的“先尝试移动、若失败则回退”逻辑，确保
+    移动角点/中点时，要么全部成功，要么彻底还原。
+    """
+    def __init__(self, image_item, label_widget):
+        """
+        :param image_item: 当前图对应的 ImageItem
+        :param label_widget: PreviewLabel (用于 contextMenu / 触发 update)
+        """
+        self.image_item = image_item
+        self.label_widget = label_widget
+
+        # 拖拽中：
+        self.dragging_corner_idx = None
+        self.dragging_mid_idx = None
+
+    # ============= 对外接口：切换当前 image_item =============
+    def set_image_item(self, image_item):
+        self.image_item = image_item
+        self.dragging_corner_idx = None
+        self.dragging_mid_idx = None
+
+    # =========================================================
+    #                鼠标事件总入口
+    # =========================================================
+
+    def on_mouse_press(self, pos, button):
+        """
+        :param pos: QPoint
+        :param button: Qt.MouseButton
+        """
+        if button == Qt.LeftButton:
+            # 左键 => 拖拽角点或中点
+            c_idx = self.hit_test_corner(pos)
+            if c_idx is not None:
+                corner = self.image_item.corners[c_idx]
+                # 若该 corner 未固定 => 准备拖动
+                if not corner.is_fixed:
+                    self.dragging_corner_idx = c_idx
+                return
+
+            m_idx = self.hit_test_midpoint(pos)
+            if m_idx is not None:
+                midpoint = self.image_item.midpoints[m_idx]
+                # 若该 midpoint 未固定 => 准备拖动
+                if not midpoint.is_fixed:
+                    self.dragging_mid_idx = m_idx
+                return
+
+        elif button == Qt.RightButton:
+            # 右键 => 弹出菜单(角点 / 中点)
+            c_idx = self.hit_test_corner(pos)
+            if c_idx is not None:
+                self.show_corner_context_menu(c_idx, self.label_widget.mapToGlobal(pos))
+                return
+
+            m_idx = self.hit_test_midpoint(pos)
+            if m_idx is not None:
+                self.show_midpoint_context_menu(m_idx, self.label_widget.mapToGlobal(pos))
+                return
+
+    def on_mouse_move(self, pos):
+        # 拖拽过程中 => 调用链式移动逻辑
+        if self.dragging_corner_idx is not None:
+            self._move_corner_by_mouse(self.dragging_corner_idx, pos)
+            self.label_widget.update()
+        elif self.dragging_mid_idx is not None:
+            self._move_midpoint_by_mouse(self.dragging_mid_idx, pos)
+            self.label_widget.update()
+
+    def on_mouse_release(self, button):
+        if button == Qt.LeftButton:
+            # 拖拽结束 => 清空状态
+            self.dragging_corner_idx = None
+            self.dragging_mid_idx = None
+            # 更新 systemFixed, 并重算所有未固定中点
+            update_system_fixed_states(self.image_item.corners, self.image_item.midpoints)
+            recalc_midpoint_positions(self.image_item.corners, self.image_item.midpoints)
+            self.label_widget.update()
+
+    # ----------------------------------------------------------------
+    #           核心：移动角点 / 中点（严格回退）
+    # ----------------------------------------------------------------
+
+    def _move_corner_by_mouse(self, corner_idx, pos):
+        """
+        严格和 Demo 一致：
+          1) 先记录 old_x, old_y
+          2) 调用 _try_move_corner
+          3) 若失败 => 还原 corner 坐标
+          4) 再 recalc_midpoint_positions
+        """
+        w = self.label_widget.width()
+        h = self.label_widget.height()
+
+        new_x = max(0.0, min(1.0, pos.x() / w))
+        new_y = max(0.0, min(1.0, pos.y() / h))
+
+        corner = self.image_item.corners[corner_idx]
+        old_x, old_y = corner.x_rel, corner.y_rel
+        # 调用 _try_move_corner
+        if not self._try_move_corner(corner_idx, new_x, new_y, visited=set()):
+            # 回退
+            corner.x_rel = old_x
+            corner.y_rel = old_y
+
+        # 成功或失败，都要重算一下未固定中点
+        recalc_midpoint_positions(self.image_item.corners, self.image_item.midpoints)
+
+    def _move_midpoint_by_mouse(self, mid_idx, pos: QPointF):
+        """
+        严格和 Demo 一致：
+          - 不先改 m.x_rel,m.y_rel，而是先验证 corner 是否能移动。
+          - 只有全部成功后，才更新 mid.x_rel, mid.y_rel；
+          - 如果任何一步失败 => 回退相关 corner => 不更新 mid。
+        """
+        w = self.label_widget.width()
+        h = self.label_widget.height()
+
+        new_mx = max(0.0, min(1.0, pos.x() / w))
+        new_my = max(0.0, min(1.0, pos.y() / h))
+
+        m = self.image_item.midpoints[mid_idx]
+        c1_idx = m.corner1_idx
+        c2_idx = m.corner2_idx
+        c1 = self.image_item.corners[c1_idx]
+        c2 = self.image_item.corners[c2_idx]
+
+        old_mx, old_my = m.x_rel, m.y_rel  # 中点原坐标
+
+        # === Case 1: both_not_fixed ===
+        if (not c1.is_fixed) and (not c2.is_fixed):
+            dx = new_mx - old_mx
+            dy = new_my - old_my
+
+            # 记录角点的旧坐标
+            old_x1, old_y1 = c1.x_rel, c1.y_rel
+            # 尝试移动 corner1
+            if not self._try_move_corner(c1_idx, old_x1 + dx, old_y1 + dy, visited=set()):
+                # 失败 => 直接 return，不更新中点
+                return
+
+            old_x2, old_y2 = c2.x_rel, c2.y_rel
+            # 再移动 corner2
+            if not self._try_move_corner(c2_idx, old_x2 + dx, old_y2 + dy, visited=set()):
+                # 回退 corner1
+                self._try_move_corner(c1_idx, old_x1, old_y1, visited=set())
+                return
+
+            # 若都成功 => 最后再赋值中点
+            m.x_rel = new_mx
+            m.y_rel = new_my
+
+        # === Case 2: 一端或两端固定 ===
+        else:
+            # 2) 一端固定 / 两端都固定
+            if c1.is_fixed and c2.is_fixed:
+                # 无法移动
+                return
+            elif c1.is_fixed and not c2.is_fixed:
+                # 计算 c2 要移动到 (2*mid - c1)
+                old_x2, old_y2 = c2.x_rel, c2.y_rel
+                target_x2 = 2*new_mx - c1.x_rel
+                target_y2 = 2*new_my - c1.y_rel
+
+                if self._try_move_corner(c2_idx, target_x2, target_y2, visited=set()):
+                    # 成功 => 更新 mid
+                    m.x_rel = new_mx
+                    m.y_rel = new_my
+                else:
+                    # 失败 => 不改 mid
+                    return
+
+            elif c2.is_fixed and not c1.is_fixed:
+                old_x1, old_y1 = c1.x_rel, c1.y_rel
+                target_x1 = 2*new_mx - c2.x_rel
+                target_y1 = 2*new_my - c2.y_rel
+
+                if self._try_move_corner(c1_idx, target_x1, target_y1, visited=set()):
+                    m.x_rel = new_mx
+                    m.y_rel = new_my
+                else:
+                    return
+
+        # 最后再 recalc
+        recalc_midpoint_positions(self.image_item.corners, self.image_item.midpoints)
+
+    # ----------------------------------------------------------------
+    #          核心递归函数：_try_move_corner
+    # ----------------------------------------------------------------
+    def _try_move_corner(self, corner_idx, new_x, new_y, visited):
+        """
+        跟 Demo 一样：
+          - 若 corner 已固定 => return False
+          - 若 visited => return True (防止死循环)
+          - 否则先改 corner 坐标 => 对关联固定的 midpoint 做带动 => 若失败就回退
+        """
+        corners = self.image_item.corners
+        if corner_idx in visited:
+            # 已访问 => 避免死循环
+            return True
+
+        corner = corners[corner_idx]
+        if corner.is_fixed:
+            return False
+
+        visited.add(corner_idx)
+
+        old_x, old_y = corner.x_rel, corner.y_rel
+        corner.x_rel = new_x
+        corner.y_rel = new_y
+
+        # 查找跟它相连的 userFixed midpoint
+        related_mids = []
+        for m in self.image_item.midpoints:
+            if m.corner1_idx == corner_idx or m.corner2_idx == corner_idx:
+                related_mids.append(m)
+
+        # 若某个 mid 是 userFixed => 保持 mid 不变 => 带动另一端 corner
+        for m in related_mids:
+            if m.userFixed:
+                # 另一端 corner => other_idx
+                if m.corner1_idx == corner_idx:
+                    other_idx = m.corner2_idx
+                else:
+                    other_idx = m.corner1_idx
+
+                other_corner = corners[other_idx]
+                if other_corner.is_fixed:
+                    # 两端都固定 => 回退
+                    corner.x_rel = old_x
+                    corner.y_rel = old_y
+                    return False
+                else:
+                    # 要保持 mid 不变 => other_corner = 2*m - corner
+                    target_x2 = 2*m.x_rel - corner.x_rel
+                    target_y2 = 2*m.y_rel - corner.y_rel
+
+                    # 递归带动另一 corner
+                    if not self._try_move_corner(other_idx, target_x2, target_y2, visited):
+                        corner.x_rel = old_x
+                        corner.y_rel = old_y
+                        return False
+
+        return True
+
+    # ----------------------------------------------------------------
+    #           命中检测
+    # ----------------------------------------------------------------
+    def hit_test_corner(self, mouse_pos, threshold=12):
+        w = self.label_widget.width()
+        h = self.label_widget.height()
+        mx, my = mouse_pos.x(), mouse_pos.y()
+        for i, c in enumerate(self.image_item.corners):
+            px, py = c.x_rel * w, c.y_rel * h
+            dist_sq = (mx - px)**2 + (my - py)**2
+            if dist_sq <= threshold**2:
+                return i
+        return None
+
+    def hit_test_midpoint(self, mouse_pos, threshold=12):
+        w = self.label_widget.width()
+        h = self.label_widget.height()
+        mx, my = mouse_pos.x(), mouse_pos.y()
+        for i, m in enumerate(self.image_item.midpoints):
+            px, py = m.x_rel * w, m.y_rel * h
+            dist_sq = (mx - px)**2 + (my - py)**2
+            if dist_sq <= threshold**2:
+                return i
+        return None
+
+    # ------------------------------------------------
+    #  右键菜单：固定/取消固定、改标号等
+    # ------------------------------------------------
+
+    def show_corner_context_menu(self, corner_idx, global_pos):
+        corner = self.image_item.corners[corner_idx]
+        menu = QMenu(self.label_widget)
+
+        if corner.userFixed:
+            act_fix = menu.addAction("取消固定(角点)")
+        else:
+            act_fix = menu.addAction("固定(角点)")
+
+        act_label = menu.addAction("更改标号")
+
+        chosen = menu.exec(global_pos)
+        if chosen is None:
+            return
+
+        if chosen == act_fix:
+            corner.userFixed = not corner.userFixed
+            update_system_fixed_states(self.image_item.corners, self.image_item.midpoints)
+            self.label_widget.update()
+        elif chosen == act_label:
+            self.show_label_submenu(corner_idx, global_pos)
+
+    def show_label_submenu(self, corner_idx, global_pos):
+        menu = QMenu(self.label_widget)
+        corner = self.image_item.corners[corner_idx]
+
+        label_actions = []
+        for lbl in [1, 2, 3, 4]:
+            act = menu.addAction(f"改为 {lbl}")
+            label_actions.append((act, lbl))
+
+        chosen = menu.exec(global_pos)
+        if chosen:
+            for (act, lbl) in label_actions:
+                if act == chosen:
+                    old_label = corner.label
+                    if old_label != lbl:
+                        # 1) 若其它角点有相同 label => 交换
+                        for c in self.image_item.corners:
+                            if c.label == lbl:
+                                c.label = old_label
+                                break
+                        corner.label = lbl
+
+                        # 2) 物理排序 corners
+                        self._reorder_corners_by_label()
+                        # 3) 重建 midpoints
+                        rebuild_midpoints_by_label_order(
+                            self.image_item.corners,
+                            self.image_item.midpoints
+                        )
+
+                        # 4) (可选) 再做一次 systemFixed + 中点位置更新
+                        update_system_fixed_states(self.image_item.corners, self.image_item.midpoints)
+                        recalc_midpoint_positions(self.image_item.corners, self.image_item.midpoints)
+
+                    self.label_widget.update()
+                    return
+
+    def _reorder_corners_by_label(self):
+        """
+        将 self.image_item.corners 按 label 升序重新排列；
+        注意重新赋值后，会改变 corner 在列表中的索引
+        """
+        sorted_corners = sorted(self.image_item.corners, key=lambda c: c.label)
+        self.image_item.corners = sorted_corners
+
+    def show_midpoint_context_menu(self, mid_idx, global_pos):
+        m = self.image_item.midpoints[mid_idx]
+        menu = QMenu(self.label_widget)
+
+        if m.userFixed:
+            act_fix = menu.addAction("取消固定(中点)")
+        else:
+            act_fix = menu.addAction("固定(中点)")
+
+        chosen = menu.exec(global_pos)
+        if chosen == act_fix:
+            m.userFixed = not m.userFixed
+            update_system_fixed_states(self.image_item.corners, self.image_item.midpoints)
+            self.label_widget.update()
+
+    # =========================================================
+    #         绘制信息提供 => 给 PreviewLabel paintEvent
+    # =========================================================
+
+    def get_drawing_info(self, w, h):
+        """
+        返回 corners, midpoints, edges(连线) 以给 PreviewLabel 的 paintEvent 绘制。
+        """
+        corners_sorted = sorted(self.image_item.corners, key=lambda c: c.label)
+        edges = []
+        # 按 label 排序后 (1->2->3->4->1)
+        for i in range(4):
+            c1 = corners_sorted[i]
+            c2 = corners_sorted[(i + 1) % 4]
+            edges.append((
+                c1.x_rel * w, c1.y_rel * h,
+                c2.x_rel * w, c2.y_rel * h
+            ))
+
+        return {
+            "corners": self.image_item.corners,
+            "midpoints": self.image_item.midpoints,
+            "edges": edges
+        }
+
+
+
+
+image_item.py 代码文件内容如下：
+
+# my_perspective_app/models/image_item.py
+from .transform_params import TransformParams
+from .shape_transform import CornerPoint, MidPoint, recalc_midpoint_positions, update_system_fixed_states
+
+class ImageItem:
+    def __init__(self, image_path):
+        self.image_path = image_path
+        # 用来保存最新（在内存中）的 verified 坐标
+        # 默认情况下是 None，表示还没加载过
+        self.verified_coords = None  # 直接存4个点(备用)
+
+        # 新增：shape_data 里存 corners / midpoints
+        # 先初始化4 corner + 4 midpoint; 后面在加载图像时，会用实际文件中读到的 coords 来覆盖
+        self.corners = [
+            CornerPoint(0.25, 0.25, 1),
+            CornerPoint(0.75, 0.25, 2),
+            CornerPoint(0.75, 0.75, 3),
+            CornerPoint(0.25, 0.75, 4),
+        ]
+        self.midpoints = [
+            MidPoint(0, 1),
+            MidPoint(1, 2),
+            MidPoint(2, 3),
+            MidPoint(3, 0),
+        ]
+        # 初始化一次 systemFixed
+        recalc_midpoint_positions(self.corners, self.midpoints)
+        update_system_fixed_states(self.corners, self.midpoints)
+
+    def set_corners_from_coords(self, coords):
+        """
+        coords: [(x1,y1), (x2,y2), (x3,y3), (x4,y4)]，顺序 = label 1,2,3,4
+        """
+        for i, (x, y) in enumerate(coords):
+            corner = self.corners[i]
+            corner.x_rel = x
+            corner.y_rel = y
+        recalc_midpoint_positions(self.corners, self.midpoints)
+        update_system_fixed_states(self.corners, self.midpoints)
+
+    def get_coords_in_label_order(self):
+        """
+        按 label 升序返回 4 个 (x,y)
+        """
+        corners_sorted = sorted(self.corners, key=lambda c: c.label)
+        return [(c.x_rel, c.y_rel) for c in corners_sorted]
+
+
+
+main_window.py 代码文件内容如下：
+
+# my_perspective_app/views/main_window.py
+
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QMenuBar
+from .preview_widget import PreviewWidget
+from .side_panel import SidePanel
+from .folder_selector import FolderSelector
+from PySide6.QtGui import QAction
+
+class MainWindow(QWidget):
+    """
+    主窗口的内容部件(若你使用 QMainWindow，可以将它作为 centralWidget)。
+    包含：
+    - 菜单栏
+    - 目标文件夹选择器(在菜单栏下方)
+    - 左侧(或中间) PreviewWidget
+    - 右侧 SidePanel
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+
+    def init_ui(self):
+        # 设置最小尺寸，避免过度挤压
+        self.setMinimumSize(1000, 600)
+        # 可选：如果你仍想在初始化时有个较大窗口，可用 resize，但别太大
+        self.resize(1200, 800)
+
+        main_layout = QVBoxLayout()
+        self.setLayout(main_layout)
+
+        # 菜单栏
+        self.menu_bar = QMenuBar(self)
+        file_menu = self.menu_bar.addMenu("文件")
+
+        # 菜单动作
+        self.action_load_file = QAction("加载文件", self)
+        self.action_load_folder = QAction("加载整个文件夹", self)
+        file_menu.addAction(self.action_load_file)
+        file_menu.addAction(self.action_load_folder)
+
+        file_menu.addSeparator()
+
+        # 新增两个动作：保存到目标文件夹 + 强制同步目标文件夹
+        self.action_save_to_folder = QAction("保存到目标文件夹", self)
+        self.action_force_sync_folder = QAction("强制同步目标文件夹", self)
+        file_menu.addAction(self.action_save_to_folder)
+        file_menu.addAction(self.action_force_sync_folder)
+
+        file_menu.addSeparator()
+
+        # === 新增：加载配置文件 ===
+        self.action_load_settings_file = QAction("加载配置文件", self)
+        file_menu.addAction(self.action_load_settings_file)
+
+        file_menu.addSeparator()
+
+        # 关闭程序
+        self.action_close_program = QAction("关闭程序", self)
+        file_menu.addAction(self.action_close_program)
+        # ============================
+
+        # 将菜单栏加到布局
+        main_layout.addWidget(self.menu_bar)
+
+        # 目标文件夹选择器
+        self.folder_selector = FolderSelector(self)
+        main_layout.addWidget(self.folder_selector)
+
+        # 主体区域：预览 + 侧边栏
+        body_layout = QHBoxLayout()
+        main_layout.addLayout(body_layout)
+
+        self.preview_widget = PreviewWidget(self)
+        self.side_panel = SidePanel(self)
+
+        # 可选：给侧边栏设个固定宽度（示例 250）
+        self.side_panel.setFixedWidth(250)
+
+        body_layout.addWidget(self.preview_widget, stretch=3)
+        body_layout.addWidget(self.side_panel, stretch=0)
+
+        # 其他基本设置
+        self.setWindowTitle("My Perspective App")
+
+

@@ -1,0 +1,48 @@
+---
+
+## **`resource_manager.py.txt`**
+
+**文件路径**: `my_perspective_app/controllers/resource_manager.py`
+
+### 1. 概述
+
+`ResourceManager` 用于统一管理“已加载区”的图像资源。它不负责具体文件复制（那是 `CacheManager` / `SyncController` 的事），只存储**哪些图片**已被加载，以及**增删**操作。
+
+### 2. 类与方法
+
+#### **`class ResourceManager`**
+
+**成员**: 
+- `self.loaded_images`: 一个 `list`，元素是 `ImageItem`（参见 `models/image_item.py`）。
+
+---
+
+#### `__init__(self)`
+- 初始化 `loaded_images` 为空列表。
+
+---
+
+#### `add_images(self, image_paths)`
+- **作用**: 批量添加图片（若路径不在已有列表中）。  
+- **内部**: 创建 `ImageItem` 对象并放入 `loaded_images`。
+
+---
+
+#### `remove_image(self, index)`
+- **作用**: 根据索引移除图片。若 `index` 不合法则忽略。
+
+---
+
+#### `clear(self)`
+- **作用**: 清空列表 `loaded_images`。
+
+---
+
+#### `get_all_images(self)`
+- **作用**: 返回当前所有 `ImageItem` 对象的列表引用。
+
+---
+
+#### `count(self)`
+- **作用**: 返回当前已加载的图片数量。
+

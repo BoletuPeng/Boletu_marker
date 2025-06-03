@@ -1,0 +1,50 @@
+---
+
+## **`image_item.py.txt`**
+
+**文件路径**: `my_perspective_app/models/image_item.py`
+
+### 1. 概述
+
+`ImageItem` 用于表示**一张图片**及其**形状变换数据**（四个角点 + 四个中点 + 固定状态），还包含 `verified_coords` 用来记录当前 4 个角点坐标 (x, y)。  
+在 `ResourceManager` 里，所有加载过的图片都是一个 `ImageItem`。
+
+### 2. 类与方法
+
+#### **`class ImageItem`**
+
+**初始化**:
+```python
+def __init__(self, image_path):
+    self.image_path = image_path
+    self.verified_coords = None
+    ...
+```
+- **成员**:  
+  - `self.image_path`: 图片文件的路径（通常为 cache 中的路径）；  
+  - `self.verified_coords`: 用于存储 `TransformParams` 读取到的 4 点坐标（只在内存中记忆，可写入 `_verified.txt` 以保持一致）；  
+  - `self.corners`: 一个长度 4 的 `CornerPoint` 列表，默认初始 4 个点 (label=1..4)；  
+  - `self.midpoints`: 对应 4 个中点 (0->1,1->2,2->3,3->0)；  
+  - 初始化后立即 `recalc_midpoint_positions + update_system_fixed_states`，保证一开始就有正确位置。
+
+---
+
+##### `set_corners_from_coords(self, coords)`
+- **作用**: 覆盖 4 个角点的 `(x_rel,y_rel)` 坐标（按 label 顺序 1,2,3,4），然后更新中点和 systemFixed 状态。  
+- **参数**: `coords`: 列表如 `[(x1,y1), (x2,y2), (x3,y3), (x4,y4)]`，对应 label=1..4。  
+- **使用场景**: 在 `PreviewWidget.display_image` 时，用从 `TransformParams` 读取到的 4 点覆盖 `corners`。
+
+---
+
+##### `get_coords_in_label_order(self)`
+- **作用**: 按 label 升序 (1->2->3->4) 返回 4 个 `(x_rel,y_rel)`。  
+- **用途**: 当用户拖拽角点后，需要把 4 点坐标保存到 `_verified.txt` 时，可通过此方法获得正确的顺序。
+
+---
+
+### 3. 上下文说明
+
+- `ImageItem` 既包含文件路径，也包含“形状变换数据”，以便在**同一对象**里查询所有相关信息；  
+- 在 `PreviewController._display_image` 时，会先从文件 (`TransformParams`) 中读取4点坐标，再更新到 `ImageItem` 的 `corners`；若用户再次修改，它也就留在内存里直到手动保存。
+
+---

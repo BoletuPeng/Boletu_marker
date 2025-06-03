@@ -1,0 +1,66 @@
+---
+
+## **`cache_manager.py.txt`**
+
+**文件路径**: `my_perspective_app/controllers/cache_manager.py`
+
+### 1. 概述
+
+`CacheManager` 用于在本地创建一个 `cache` 文件夹，并将用户选定加载的图片（及同名 `.txt` / `_verified.txt`）**复制**进这个 `cache`，从而让后续程序**只使用 `cache` 中的路径**。这样一来，如果用户移动/删除了原文件夹，应用也不受影响。
+
+### 2. 类与方法
+
+#### **`class CacheManager`**
+
+**初始化**:
+```python
+def __init__(self, base_dir, parent_widget=None):
+    ...
+```
+- **参数**:  
+  - `base_dir`: 通常是 `main.py` 所在目录，方便 `os.path.join(base_dir, 'cache')`；  
+  - `parent_widget`: 用于发生异常时弹出提示。  
+- **内部逻辑**:  
+  - 若 `cache` 文件夹不存在 => `os.makedirs`；  
+  - 若已存在 => `_clear_folder(cache_folder)` 清空它，以保证每次启动都是干净状态。
+
+---
+
+##### `_clear_folder(self, folder)`
+- **作用**: 删除 folder 内所有文件和子文件夹；这是一个**递归清理**操作。
+
+---
+
+##### `backup_files(self, file_paths)`
+- **作用**:  
+  - 逐一将传入的 `file_paths`（图片）复制到 `cache` 中；  
+  - 对每个图片，还会检查是否存在同名 `.txt` / `_verified.txt` 并一并复制；  
+  - 返回在 `cache` 中的新路径列表（只包含图片的路径，不包含 txt/_verified 路径）。
+
+- **内部流程**:  
+  1. 对每个 `src_path` 调 `_copy_to_cache(src_path)` 拷贝到 cache；  
+  2. 然后查看 `base_no_ext + ".txt"`、`base_no_ext + "_verified.txt"` 是否存在，存在就复制；  
+  3. 把复制后生成的图片路径收集到 `new_paths` 并返回。
+
+---
+
+##### `_copy_to_cache(self, src_path)`
+- **作用**:  
+  1. 计算目标 `dst_path` => `cache/` + 文件名；  
+  2. 若重名（目标已存在），则 `_get_unique_path(...)` 自动加 `_1`, `_2` 后缀；  
+  3. 复制源文件到目标路径；若出现异常，则弹窗告知并返回空字符串；  
+  4. 返回新路径。
+
+---
+
+##### `_get_unique_path(self, path)`
+- **作用**: 若 `path` 已存在，则在文件名后添加 `_1`, `_2`... 直到找到未使用的名字。
+
+---
+
+### 3. 上下文说明
+
+- `CacheManager` 常在 `MainController.__init__` 时被初始化，用于在应用启动时就准备 `cache`。  
+- 当用户在“加载文件”或“加载整个文件夹”时，会先调用 `backup_files(...)`，再把返回的 **cache** 路径们写入 `ResourceManager`。  
+- 这避免了后续对原文件路径的依赖问题，并确保即使源文件移动/删除，应用仍然可以正常访问图像数据。
+

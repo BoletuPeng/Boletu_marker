@@ -1,0 +1,50 @@
+---
+
+## **`settings_controller.py.txt`**
+
+**文件路径**: `my_perspective_app/controllers/settings_controller.py`
+
+### 1. 概述
+
+`SettingsController` 用于管理应用的 `settings.txt` 文件，读写简单的配置项。目前只示例了 `canvas_height`。也可扩展更多字段。
+
+### 2. 类与方法
+
+#### **`class SettingsController`**
+
+**核心成员**:  
+- `self.settings_path`: 本地 `settings.txt` 的路径；  
+- `self.config_data`: dict，用来存储配置值，如 `"canvas_height": 1000`。
+
+---
+
+#### `__init__(self, settings_path)`
+- **作用**:  
+  1. 保存 `settings_path`；  
+  2. 如果文件不存在则写入默认配置；  
+  3. 如果文件存在则读入。
+
+---
+
+#### `load_from_file(self, path)`
+- **作用**: 从指定 path 读取配置行，若遇到 `canvas_height=xxx` 就保存到 `self.config_data`。
+
+---
+
+#### `overwrite_local_settings_with(self, external_path)`
+- **作用**: 将 `external_path` 的内容读入到 `config_data`，然后覆盖写回到本地 `settings_path`。
+
+---
+
+#### `_write_to_file(self)`
+- **作用**: 将 `self.config_data` 的值写回 `settings.txt`。
+
+---
+
+#### `get_canvas_height(self)`
+- **作用**: 返回当前 `canvas_height`（若没写则默认 1000）。
+
+---
+
+#### `set_canvas_height(self, new_height)`
+- **作用**: 将 `new_height` 夹在 [500, 4000] 范围内，并写入文件。

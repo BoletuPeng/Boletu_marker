@@ -1,0 +1,131 @@
+---
+
+## 2. **`shape_transform_controller.py.txt`**
+
+**文件路径**: `my_perspective_app/controllers/shape_transform_controller.py`
+
+### 1. 概述
+
+`ShapeTransformController` 管理**形状变换**的链式带动逻辑，包括角点/中点固定、拖拽回退等，但**不再直接依赖**具体 widget，转而通过**传入**`(pos, widget_width, widget_height)` 来进行坐标计算和命中检测。
+
+主要功能：
+
+- 记录/修改 `image_item`（包含 `corners` / `midpoints`）；  
+- `_try_move_corner`, `_move_midpoint_by_mouse` 等函数实现**极度严格**的回退逻辑；  
+- 右键菜单的逻辑也不再直接显示，而是通过 `get_context_menu_info()` 返回一组可供外部 UI 调用的 `(文本, 回调)`。
+
+### 2. 类与方法
+
+#### **`class ShapeTransformController`**
+
+**成员**:  
+- `self.image_item`: 当前图像数据 (`ImageItem`)，可随时 `set_image_item`。  
+- `self.dragging_corner_idx`, `self.dragging_mid_idx`: 当前被拖拽的角点/中点索引，或 None。
+
+---
+
+##### `__init__(self, image_item)`
+- **作用**: 保存 `image_item`，初始化拖拽状态为空。
+
+---
+
+##### `set_image_item(self, image_item)`
+- **作用**: 切换到新的 `image_item`，并重置拖拽状态。
+
+---
+
+### **鼠标相关：**
+
+##### `on_mouse_press(self, pos, button, widget_width, widget_height)`
+- **作用**:  
+  1. 若左键 => 命中检测 corner / midpoint，若未固定则准备拖拽；  
+  2. 若右键 => 不在此直接处理（可能外部通过 `get_context_menu_info` 来显示菜单）。
+
+---
+
+##### `on_mouse_move(self, pos, widget_width, widget_height)`
+- **作用**:  
+  1. 若正在拖拽 corner => `_move_corner_by_mouse`;  
+  2. 若正在拖拽 midpoint => `_move_midpoint_by_mouse`;  
+  3. 外部 UI 也需 `update()` 以重绘最新位置。
+
+---
+
+##### `on_mouse_release(self, button)`
+- **作用**:  
+  1. 清空拖拽状态；  
+  2. 再 `update_system_fixed_states` + `recalc_midpoint_positions`。
+
+---
+
+### **右键菜单信息：**
+
+##### `get_context_menu_info(self, pos, widget_width, widget_height)`
+- **作用**:  
+  1. 命中检测 corner 或 midpoint；  
+  2. 若 corner => `_get_corner_context_menu_info`; 若 midpoint => `_get_midpoint_context_menu_info`；  
+  3. 返回一个 dict 包含 `{"actions": [(菜单文本, 回调函数), ...]}`，供外部 QMenu 调用。
+
+---
+
+##### `_get_corner_context_menu_info(self, corner_idx)`
+- **作用**: 根据 corner.fixed 状态添加“固定(角点)/取消固定(角点)”等动作；另外提供“改为 1,2,3,4”选项。
+
+---
+
+##### `_get_midpoint_context_menu_info(self, mid_idx)`
+- **作用**: 同理，为中点提供“固定(中点)/取消固定(中点)”菜单。
+
+---
+
+##### `_toggle_corner_fixed(self, corner_idx)` / `_toggle_midpoint_fixed(self, mid_idx)`
+- **作用**: 切换 `userFixed`，并 `update_system_fixed_states` / `recalc_midpoint_positions`。
+
+---
+
+##### `_change_corner_label(self, corner_idx, new_label)`
+- **作用**: 若与别的 corner 冲突则交换 label；然后重新排序 + 重建 midpoints + 刷新系统固定。
+
+---
+
+### **拖拽移动：**
+
+##### `_move_corner_by_mouse(self, corner_idx, pos, w, h)`
+- **作用**:  
+  1. 先记录旧坐标；  
+  2. 调 `_try_move_corner`;  
+  3. 若失败 => 回退；  
+  4. 最后 `recalc_midpoint_positions`。
+
+---
+
+##### `_move_midpoint_by_mouse(self, mid_idx, pos, w, h)`
+- **作用**:  
+  1. 不立即改中点坐标 => 先尝试移动 corner1 => corner2 => 若都成功再赋给中点；  
+  2. 若冲突则回退 corner1 并不更新中点；  
+  3. 处理“一端固定 / 两端固定 / 均不固定”三种情况；  
+  4. 结束后 `recalc_midpoint_positions`。
+
+---
+
+##### `_try_move_corner(self, corner_idx, new_x, new_y, visited)`
+- **作用**: 递归移动 corner 并带动 userFixed 的 midpoint 另一端 corner；若遇到对端 corner 也固定就回退。若 visited 列表里有 corner_idx 就表示已访问过，防循环。
+
+---
+
+### **命中检测**:
+
+##### `hit_test_corner(self, pos, widget_width, widget_height, threshold=12)`
+- **作用**: 将 pos.x()/pos.y() 与 corner 的 `(x_rel*widget_width, y_rel*widget_height)` 对比，若距离 <= threshold 就返回该 corner 的索引。
+
+---
+
+##### `hit_test_midpoint(self, pos, widget_width, widget_height, threshold=12)`
+- 同理，对中点做距离检测。
+
+---
+
+### 3. 使用场景
+
+- 在**Overlay**（如 `perspective_overlay.py`）里被调用，以执行角点/中点的鼠标交互；  
+- 不关心 UI 具体 widget，仅通过 `(pos, widget_width, widget_height)` 进行坐标变换。

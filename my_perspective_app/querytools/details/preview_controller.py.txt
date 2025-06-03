@@ -1,0 +1,111 @@
+---
+
+## 1. **`preview_controller.py.txt`**
+
+**文件路径**: `my_perspective_app/controllers/preview_controller.py`
+
+### 1. 概述
+
+`PreviewController` 用于**在预览区**(PreviewWidget)管理以下逻辑：  
+- 显示 `ResourceManager` 中的图片，并**维护当前索引**；  
+- 处理缩略图点击/移除、翻页按钮；  
+- 当用户**拖拽文件**进预览时，将其加入 `ResourceManager` 并刷新；  
+- 在 `_display_image()` 中会加载 `.txt` / `_verified.txt` 的 4 个角点，并填充到 `ImageItem`；  
+- 提供给 `PreviewWidget` 的 “overlay” 机制调用（见“Overlay”在 `preview_widget.py` / `perspective_overlay.py`），最终在用户完成拖拽后可能写回 `_verified.txt`。
+
+### 2. 类与主要方法
+
+#### **`class PreviewController`**
+
+---
+
+##### `__init__(self, preview_widget, resource_manager)`
+- **参数**:  
+  - `preview_widget`: 预览 UI 容器 (`PreviewWidget`)；  
+  - `resource_manager`: 管理已加载图片的 `ResourceManager`。  
+- **作用**:  
+  1. 记录 `current_canvas_height = 600`；  
+  2. 建立与 `preview_widget.thumbnail_bar` 的信号连接：  
+     - `thumbnail_clicked` => `on_thumbnail_clicked`  
+     - `thumbnail_removed` => `on_thumbnail_removed`  
+  3. 建立与 `preview_widget` 的信号连接（翻页、文件拖拽、`overlay_params_changed_signal` 等）：  
+     - `request_previous` => `show_previous_image`  
+     - `request_next` => `show_next_image`  
+     - `file_dropped` => `on_file_dropped`  
+     - `overlay_params_changed_signal` => `on_overlay_params_changed` (用于透视参数或其他 overlay 更新回调)  
+  4. 初始化 `current_index = 0`。
+
+---
+
+##### `set_canvas_height(self, height)`
+- **作用**: 外部（例如 `MainController`）调用以更新预览画布的期望像素高度；存到 `self.current_canvas_height`。
+
+---
+
+##### `refresh_thumbnails_and_display(self)`
+- **作用**:  
+  1. 若 `current_index` 超过可用范围，重置为0；  
+  2. 从 `resource_manager` 获取所有已加载的 `image_items`；若为空则清空预览；  
+  3. 给 `thumbnail_bar` 设置缩略图，并高亮当前索引；  
+  4. 调 `_display_image(self.current_index)` 显示当前图片。
+
+---
+
+##### `on_thumbnail_clicked(self, index)`
+- **作用**: 当底部缩略图**左键**被点击，更新 `current_index` 并 `_display_image(index)`。
+
+---
+
+##### `on_thumbnail_removed(self, index)`
+- **作用**: 当底部缩略图**右键菜单“移除”**选项被点击：  
+  1. `resource_manager.remove_image(index)`；  
+  2. 如果 `index < current_index`，则 `current_index -= 1`；  
+  3. `refresh_thumbnails_and_display()` 以更新界面。
+
+---
+
+##### `_display_image(self, index)`
+- **作用**:  
+  1. 获取 `image_item = resource_manager.get_all_images()[index]`；  
+  2. 读取该图对应的 4 角点 (via `TransformParams.load_for_image(image_item.image_path)`)；  
+  3. 将其 `coords` 保存到 `image_item.verified_coords` 并调用 `image_item.set_corners_from_coords(...)`；  
+  4. 调用 `preview_widget.display_image(image_item, canvas_height=self.current_canvas_height)` 显示。
+
+---
+
+##### `show_previous_image(self)`
+- **作用**: 切换到上一张图片（若有），并 `_display_image()`。
+
+---
+
+##### `show_next_image(self)`
+- **作用**: 切换到下一张图片（若有），并 `_display_image()`。
+
+---
+
+##### `on_overlay_params_changed(self, overlay_type, data)`
+- **作用**: 当 `PreviewWidget` 的 overlay（例如 `perspective_overlay`）报告用户修改/保存了形变数据：  
+  - `overlay_type` 可能是 `"perspective"` / `"perspective-save"` / `"sam2"` 等；  
+  - `data` 可能是 4 角点坐标或其他信息。  
+- **逻辑**:  
+  1. 获取当前 `image_item`；  
+  2. 若 `overlay_type == "perspective"`：  
+     - `data` 为 4 点坐标 => 写入 `current_image.verified_coords`；同时写 `_verified.txt`。  
+  3. 若 `overlay_type == "perspective-save"`：  
+     - 同上，只是用户点击“保存(仅透视)”按钮时触发；  
+  4. 其他类型(如 `sam2`) 先留作占位逻辑或简单打印。
+
+---
+
+##### `on_file_dropped(self, paths)`
+- **作用**: 当用户直接在 `PreviewWidget` 拖拽文件进来：  
+  1. `resource_manager.add_images(paths)`；  
+  2. `refresh_thumbnails_and_display()`。
+
+---
+
+### 3. 用法
+
+- 在初始化时由 `MainController` 创建，并传入 `preview_widget`；  
+- 如果外部需要更新画布高度，则调用 `set_canvas_height()` 并让 `_display_image()` 时应用到缩放；  
+- 处理 UI 的缩略图与翻页，也接收 overlay 形变信息并做 `_verified.txt` 写入。

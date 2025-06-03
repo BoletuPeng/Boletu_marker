@@ -1,0 +1,43 @@
+---
+
+## 3. **`main_window.py.txt`**
+
+**文件路径**: `my_perspective_app/views/main_window.py`
+
+### 1. 概述
+
+`MainWindow` 用作应用的主界面部件（如果你使用 `QMainWindow`, 可以把它设为 centralWidget；如果你使用 `QWidget`, 它则是最上层的容器）。其中包含：
+
+1. **菜单栏** (`QMenuBar`)，内含加载/保存/同步/关闭程序等菜单项；  
+2. **`FolderSelector`**：目标文件夹选择器；  
+3. **布局**：一个水平布局放 `PreviewWidget`（左） 和 `SidePanel`（右）。  
+
+### 2. 类与主要方法
+
+#### **`class MainWindow(QWidget)`**
+
+---
+
+##### `__init__(self, parent=None)`
+- **作用**: 调用 `init_ui()` 初始化界面布局；设定最小尺寸等。
+
+---
+
+##### `init_ui(self)`
+- **作用**:  
+  1. 创建 `QMenuBar`，在 `文件` 菜单添加若干 `QAction`：  
+     - `action_load_file`, `action_load_folder`, `action_save_to_folder`, `action_force_sync_folder`, `action_load_settings_file`, `action_close_program`  
+  2. 创建 `FolderSelector` 并放在菜单栏下；  
+  3. 创建一个水平布局 `body_layout` => 左侧 `PreviewWidget`, 右侧 `SidePanel`；  
+  4. 给 `SidePanel` 固定宽度，比如250；  
+  5. 设置窗口标题“My Perspective App”。
+
+---
+
+### 3. 使用场景
+
+- 由 `app.py` 里的 `MyPerspectiveApp` 设置为 `setCentralWidget(self.main_window)`；  
+- `MainController` 会在其 `__init__` 中连接 `action_load_file`, `action_force_sync_folder` 等菜单触发器，以响应用户操作；  
+- `SidePanel` 发射“canvas_height_changed”，`FolderSelector` 发射“folder_selected”，这些信号都被 `MainController` 或其他逻辑捕捉到。
+
+---

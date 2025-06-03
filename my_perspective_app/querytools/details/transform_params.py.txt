@@ -1,0 +1,43 @@
+
+---
+
+## **`transform_params.py` 详细说明**
+
+**文件路径**: `my_perspective_app/models/transform_params.py`
+
+### 1. 概述
+
+`TransformParams` 用于管理**4 个角点**坐标的**读写**，与 `.txt` / `_verified.txt` 文件进行**简单的序列化/反序列化**。在项目中，通常会将**最终的 4 个角点**（label=1..4）保存到 `_verified.txt`；而中点或固定状态信息**不在**此文件中。
+
+### 2. 类与方法
+
+#### **`class TransformParams`**
+- **属性**:  
+  - `coords`: 长度为 4 的列表，每个元素是 `(x, y)` 表示相对坐标；若未指定会使用默认值 `[(0.25, 0.25), (0.75, 0.25), ...]`。
+
+---
+
+#### `@staticmethod load_from_file(txt_path)`
+- **作用**: 从本地 txt 文件中读取 4 个坐标；  
+- **逻辑**:  
+  - 如果 `txt_path` 不存在，则返回默认 `TransformParams()`；  
+  - 否则读取内容并用两个空行拆分，解析出 `(x, y)`。
+
+#### `@staticmethod save_to_file(txt_path, coords)`
+- **作用**: 将 4 个 `(x, y)` 坐标写入 txt 文件；每个坐标之间用**两个空行**分隔。  
+- **参数**:  
+  - `coords`: 形如 `[(x1,y1), (x2,y2), (x3,y3), (x4,y4)]`。
+
+---
+
+#### `@staticmethod load_for_image(image_path)`
+- **作用**: 根据 `image_path`，优先加载 `_verified.txt` 文件，否则加载 `.txt` 文件，若都没有则返回默认。  
+- **返回**: `TransformParams` 实例。
+
+---
+
+### 3. 用途场景
+
+- 在 `PreviewController` 或 `MainController` 里，加载图像时通常会先调用 `TransformParams.load_for_image(...)` 来获取该图对应的 4 个角点；  
+- 当用户校正完后，再调用 `save_to_file(verified_path, coords)` 写入 `_verified.txt`；  
+- 并**不**包含中点或固定状态，仅对 4 角点进行保存/读取。

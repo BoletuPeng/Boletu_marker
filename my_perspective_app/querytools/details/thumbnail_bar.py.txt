@@ -1,0 +1,94 @@
+---
+
+## **`thumbnail_bar.py.txt`**
+
+**文件路径**: `my_perspective_app/views/thumbnail_bar.py`
+
+### 1. 概述
+
+`ThumbnailBar` 是一个**可横向滚动**的缩略图容器，通常放在预览区底部。  
+- 它显示多张图片的缩略图，一行排开；  
+- 用户**左键点击**某缩略图 => 发射 `thumbnail_clicked(index)` 信号；  
+- 用户**右键点击**某缩略图 => 显示菜单，可选择“移除该图片”，并发射 `thumbnail_removed(index)` 信号；  
+- 滚轮上下滚动改为**水平滚动**，通过 `HorizontalScrollArea`.
+
+### 2. 类与方法
+
+#### **`class HorizontalScrollArea(QScrollArea)`**
+- 继承自 `QScrollArea`，**重写** `wheelEvent`：  
+  - 默认 `QScrollArea` 是垂直滚动，这里改为**水平滚动**，即 `bar.value() -= step` / `+= step` 根据滚轮方向移动滚动条。  
+  - `event.accept()` 处理后表示我们自行处理滚轮，不走默认垂直逻辑。
+
+---
+
+#### **`class ThumbnailBar(QWidget)`**
+
+**信号**:
+```python
+thumbnail_clicked = Signal(int)
+thumbnail_removed = Signal(int)
+```
+- **thumbnail_clicked**: 当用户左键点击某缩略图时，传递该缩略图索引。  
+- **thumbnail_removed**: 当用户右键菜单选择“移除”时，传递该缩略图索引。
+
+**主要成员**:
+- `self.scroll_area`: 一个 `HorizontalScrollArea`；  
+- `self.container`: `QWidget`，放在 `scroll_area` 内；  
+- `self.h_layout`: 容纳缩略图的 `QHBoxLayout`；  
+- `self.thumbnail_labels`: 存储所有缩略图 `QLabel`；  
+- `self.selected_index`: 当前选中的索引（高亮用）。
+
+---
+
+##### `__init__(self, parent=None)`
+- **作用**:  
+  1. 设置固定高度（如130px），创建 `HorizontalScrollArea` 并设为 `setWidgetResizable(True)`；  
+  2. `container + h_layout` 形成**横向布局**；  
+  3. 自身用 `QVBoxLayout`，嵌入 `scroll_area`；  
+  4. 初始化 `thumbnail_labels = []`、`selected_index = -1`。
+
+---
+
+##### `clear_thumbnails(self)`
+- **作用**: 删除所有已有缩略图 label，并清空 `self.thumbnail_labels`。
+
+---
+
+##### `set_thumbnails(self, image_paths)`
+- **作用**:  
+  1. 先 `clear_thumbnails()`；  
+  2. 遍历传入的 `image_paths`，为每张图加载 `QPixmap` 并缩放到一个固定大小（如100x100）；  
+  3. 用 `_ClickableLabel` 封装，让其发射 `mouse_pressed` / `right_clicked` 信号；  
+  4. 加入到 `h_layout` 并存储到 `thumbnail_labels` 列表。
+
+---
+
+##### `set_current_index(self, idx)`
+- **作用**: 高亮当前索引的缩略图（用红色边框），其余设为透明边框。
+
+---
+
+##### `_on_label_left_clicked(self, index)`
+- **作用**: 当 `_ClickableLabel` 左键点击后，发射 `thumbnail_clicked(index)`。
+
+---
+
+##### `_on_label_right_clicked(self, index)`
+- **作用**: 当 `_ClickableLabel` 右键点击后，显示一个菜单，只含一项 “移除该图片”，若用户选择，则发射 `thumbnail_removed(index)`。
+
+---
+
+#### **`class _ClickableLabel(QLabel)`**
+- **内部类**: 用来**捕捉鼠标事件**并发射对应信号。  
+- **信号**:  
+  - `mouse_pressed(int)`  
+  - `right_clicked(int)`  
+- `mousePressEvent`: 分别判断左键 / 右键，发射对应信号并携带 `self.index`。
+
+---
+
+### 3. 使用场景
+
+- 用于在 `PreviewWidget` 或其他容器底部显示多张已加载图片的缩略图；  
+- 提供左键点击切换图片、右键移除图片等功能；  
+- 与 `PreviewController` 配合：`thumbnail_clicked(index)` => 调用 `PreviewController.on_thumbnail_clicked(index)` 来显示对应图片。

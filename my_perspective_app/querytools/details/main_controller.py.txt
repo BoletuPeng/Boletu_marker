@@ -1,0 +1,116 @@
+
+
+---
+
+## **`main_controller.py.txt`**
+
+**文件路径**: `my_perspective_app/controllers/main_controller.py`
+
+### 1. 概述
+
+`MainController` 是整个应用的主控制器，负责**统筹以下功能**：  
+- 管理全局资源（`ResourceManager`）和预览（`PreviewController`）；  
+- 目标文件夹的选择、加载本地文件或文件夹；  
+- 程序关闭前弹出 5 按钮对话框（强制同步、保存、不保存、改文件夹、取消）；  
+- 维护并调用 `CacheManager`、`SettingsController` 等辅助类。
+
+它继承自 PySide6 的 `QObject`，并在构造时把 `MainWindow` 传给自己，用以关联 UI。
+
+### 2. 类与方法
+
+#### **`class MainController(QObject)`**
+
+**主要成员**:
+
+- `self.main_window`: 主窗口对象 (`MainWindow`)；  
+- `self.resource_manager`: 一个 `ResourceManager` 实例，用于管理已加载图片；  
+- `self.preview_controller`: 预览控制器 (`PreviewController`)，负责缩略图、预览逻辑；  
+- `self.cache_manager`: 负责复制文件到本地 `cache`；  
+- `self.settings_controller`: 负责读取/写入 `settings.txt`；  
+- `self.target_folder`: 字符串，记录当前目标文件夹路径；  
+- `self.canvas_height`: 从 `settings_controller` 初始化的画布高度。
+
+---
+
+#### `__init__(self, main_window)`
+- **作用**:  
+  1. 调用父类构造；  
+  2. 创建 `ResourceManager`、`PreviewController`；  
+  3. 初始化 `CacheManager`、`SettingsController`；  
+  4. 连接菜单事件与相应方法（如“加载文件”、“保存到目标文件夹”...）；  
+  5. 监听侧边栏滑动条更改，实时更新画布高度；  
+  6. 给 `main_window` 安装事件过滤器，用于在用户关闭窗口时拦截并弹出 5 按钮对话框。
+
+---
+
+#### `_on_canvas_height_slider_changed(self, new_val)`
+- **作用**: 当用户在侧边栏拖动“画布高度”滑动条时：  
+  1. 更新 `settings_controller`；  
+  2. 更新本地 `self.canvas_height`；  
+  3. 通知 `preview_controller` 刷新预览时的大小。
+
+---
+
+#### `load_settings_file(self)`
+- **作用**: 当用户点“加载配置文件”菜单时：  
+  1. 提示是否先备份本地 `settings.txt`；  
+  2. 若用户选择继续，则弹出文件对话框选择外部 `settings.txt`；  
+  3. 覆写本地设置后，重新获取 `canvas_height` 并刷新侧边栏与预览。
+
+---
+
+#### `load_file(self)`
+- **作用**: 当用户点“加载文件”菜单时，弹出对话框选择图像文件，随后：  
+  1. 将源文件先备份到 `cache_manager`；  
+  2. 把缓存后的路径交给 `resource_manager.add_images`；  
+  3. 调 `preview_controller.refresh_thumbnails_and_display` 刷新预览。
+
+---
+
+#### `load_folder(self)`
+- **作用**: 当用户点“加载整个文件夹”菜单时，弹出对话框选择文件夹，随后调用内部 `_load_folder_internal` 进行加载。
+
+---
+
+#### `on_target_folder_selected(self, folder_path)`
+- **作用**: 当用户在 `FolderSelector` 改变目标文件夹后，自动执行一次加载整个文件夹。
+
+---
+
+#### `_load_folder_internal(self, folder_path)`
+- **作用**: 扫描文件夹下所有图片（扩展名 .jpg/.jpeg/.png/.bmp），复制到 cache，然后加到 `ResourceManager` 并刷新预览。
+
+---
+
+#### `save_to_target_folder(self)`
+- **作用**: 普通“保存到目标文件夹”。  
+  1. 若没有已加载图片或未选目标文件夹则弹窗提示；  
+  2. 否则使用 `SyncController` 的 `sync_resources_in_pairs` 来复制文件；  
+  3. 成功后提示“已保存并同步”。
+
+---
+
+#### `force_sync_to_target_folder(self)`
+- **作用**: “强制同步目标文件夹”。  
+  1. 同样检查是否有已加载图片、是否已选目标文件夹；  
+  2. 若正常，则 `SyncController.force_sync_resources` 先清空目标文件夹，再复制。
+
+---
+
+#### `close_program(self)`
+- **作用**: 当用户点“关闭程序”菜单时，调用 `main_window.close()` 触发窗口关闭事件，然后在 `eventFilter` 中进行弹窗。
+
+---
+
+#### `eventFilter(self, obj, event)`
+- **作用**: 捕获 `main_window` 的 `Close` 事件，若 `resource_manager` 有图像则弹出 5 按钮对话框：  
+  - “强制同步目标文件夹” => `force_sync_to_target_folder()`；  
+  - “保存到目标文件夹” => `save_to_target_folder()`；  
+  - “更改目标文件夹” => 再次弹出文件夹对话框后回到循环；  
+  - “不保存” => 直接关闭；  
+  - “取消” => 不关闭。  
+
+若 `resource_manager` 无图片，则直接允许关闭。
+
+
+

@@ -1,0 +1,42 @@
+
+
+---
+
+## **`main.py.txt`**
+
+**文件路径**: `my_perspective_app/main.py`
+
+### 1. 概述
+
+`main.py` 是整个应用的**入口点**。它的主要功能包括：
+
+1. 创建 `QApplication` 实例；  
+2. 初始化并显示主应用窗口 (`MyPerspectiveApp`)；  
+3. 监听应用退出状态码。
+
+在 PySide6 (或 Qt) 项目中通常都会在单独的 `main.py` 或类似命名的脚本中调用 `QApplication(sys.argv)`，然后创建并展示主窗口对象，以启动事件循环（`app.exec()`）。
+
+### 2. 函数与逻辑
+
+#### `main()`
+- **作用**:  
+  1. 创建 `QApplication` 并接收命令行参数 `sys.argv`；  
+  2. 初始化 `MyPerspectiveApp()`；  
+  3. 调用 `window.show()` 使主窗口可见；  
+  4. 执行 `app.exec()` 进入 Qt 事件循环，直到窗口关闭才会返回状态码并 `sys.exit`。  
+- **参数**: 无显式参数，但从 `sys.argv` 读取命令行。  
+- **返回**: `sys.exit(app.exec())` 将事件循环的退出码作为 Python 进程退出码。
+
+---
+
+#### `if __name__ == "__main__": main()`
+- **作用**: 当直接执行 `main.py` 时，调用 `main()`；如果仅是被导入，则不会运行此入口。
+
+---
+
+### 3. 上下文说明
+
+- `main.py` 一般不存放业务逻辑，仅仅是一个“启动”脚本。  
+- `MyPerspectiveApp`（见 `app.py`）是项目的主窗口类，用来封装主界面和控制器的初始化。  
+- 若将来项目增大，也可以在 `main.py` 中添加命令行解析、调试开关等。
+

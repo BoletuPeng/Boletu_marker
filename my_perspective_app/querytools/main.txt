@@ -1,0 +1,284 @@
+  这是一个MVP/MVC架构的项目，如下：
+
+
+  以下是一份**最新的主说明文档**，用来替换原本的老说明，使项目新成员或外部团队在当下的改造完成后能快速了解**现有**的整体架构、功能、以及各模块的职责与交互。请注意，这是一份**整合过后的完整说明**，与此前的任何“增量式”对比或历史说明不同，它描述的就是**当前最新版**的项目结构和设计。
+
+  ---
+
+  # 一、项目结构
+
+  ```
+  my_perspective_app/
+  ├── main.py
+  ├── app.py
+  ├── controllers
+  │   ├── main_controller.py
+  │   ├── preview_controller.py
+  │   ├── sync_controller.py
+  │   ├── settings_controller.py
+  │   ├── resource_manager.py
+  │   ├── cache_manager.py
+  │   └── shape_transform_controller.py
+  ├── models
+  │   ├── transform_params.py
+  │   ├── image_item.py
+  │   └── shape_transform.py
+  ├── views
+  │   ├── main_window.py
+  │   ├── preview_widget.py
+  │   ├── side_panel.py
+  │   ├── folder_selector.py
+  │   ├── thumbnail_bar.py
+  │   └── overlays
+  │       └── perspective_overlay.py
+  └── resources
+      └── icons
+          └── ... (图标等资源)
+  ```
+
+  > **主要分为：**  
+  > - **根目录**：`main.py` (入口)、`app.py` (主应用类)  
+  > - **controllers**：核心业务控制层，管理预览切换、文件同步、形变控制、资源读写等  
+  > - **models**：数据模型、图像/参数数据结构、读写方法  
+  > - **views**：UI 视图层，包含主窗体、预览Widget、侧边栏、缩略图栏、以及叠加显示模块(`overlays`)等  
+  > - **resources**：放置图标等静态资源  
+
+  ---
+
+  # 二、项目目的与主要功能
+
+  本项目是一个**基于 PySide6 的多模式图像预览与标注应用**，当前尤其针对身份证/证件照等图片处理场景。用户可以一次性加载多个图像并进行不同模式下的标记或参数调整。功能要点包括：
+
+  1. **批量图片管理与拖拽加载**：可加载文件/文件夹，或将图片直接拖拽到预览区。  
+  2. **预览区与缩略图栏**：可快速在缩略图中点击切换图片，右键移除。  
+  3. **多种标记模式**：  
+    - **不加载标记 (none)**：只是查看图片，无任何标记。  
+    - **加载透视变形参数 (perspective)**：可拖拽角点/中点实现严格链式透视校正。  
+    - **加载SAM2分割遮罩 (sam2)**：后续实现，当前留占位。  
+    - **根据SAM2分割遮罩回归透视 (sam2_to_persp)**：后续实现，占位状态。  
+  4. **透视/形状变换**(在 `perspective` 模式下)：  
+    - 提供 “4 角点 + 4 中点” 的可拖拽逻辑；中点可固定，牵动角点时保持中点不变。  
+    - 右键可固定/解固定角点/中点，或交换/重排角点 label 1~4。  
+  5. **缩放预览 & 目标画布高度**：  
+    - 鼠标滚轮可放大/缩小，侧边栏滑动条调节“画布高度”，并实时应用到预览显示。  
+  6. **缓存模式**：  
+    - 加载的图片复制到本地 `cache` 文件夹，以避免源文件丢失后本地无法访问。  
+  7. **目标文件夹同步**：  
+    - 普通同步（逐个复制 + 冲突弹窗）  
+    - 强制同步（先清空后复制）  
+  8. **外部配置文件**：  
+    - `settings_controller.py` 负责读取/写入 `settings.txt`；可保存/载入“画布高度”等参数。  
+  9. **退出时 5 个按钮弹窗**：  
+    - 强制同步  
+    - 保存到目标文件夹  
+    - 更改目标文件夹  
+    - 不保存  
+    - 取消  
+  10. **多参数文件读写**：  
+    - 目前在 `perspective` 模式下自动读写 `_verified.txt`；  
+    - 未来可能针对 “sam2” 等模式扩展新的文件格式。
+
+  ---
+
+  # 三、主要模块说明
+
+  下文仅简述每个目录（及其主要文件）的作用。若需要更详细的函数/类说明，请查看对应的 `xxx.py.txt` 或源码。
+
+  ## 1. 根目录
+
+  ### **`main.py`**  
+  - **作用**：入口脚本，初始化 `QApplication`，创建并显示 `MyPerspectiveApp` 主窗口，然后进入事件循环。
+
+  ### **`app.py`**  
+  - **类**：`MyPerspectiveApp(QMainWindow)`  
+  - **功能**：  
+    - 继承自 `QMainWindow`；  
+    - 内部使用 `MainWindow`(见 `main_window.py`) 作为 centralWidget；  
+    - 创建 `MainController` 等核心控制器并对外暴露全局交互入口。  
+
+  ---
+
+  ## 2. `controllers/` 目录
+
+  ### **`main_controller.py`**  
+  - **类**：`MainController` (继承自 `QObject`)  
+  - **功能**：  
+    - 统管主窗口的菜单、文件夹选择等；  
+    - 持有并调用 `ResourceManager`, `PreviewController`, `CacheManager`, `SettingsController` 等；  
+    - 处理加载文件/文件夹、保存到目标文件夹、关闭时 5 个按钮对话框等业务逻辑。
+
+  ### **`preview_controller.py`**  
+  - **类**：`PreviewController`  
+  - **功能**：  
+    - 管理与 `PreviewWidget` 的通信（翻页、缩略图点击/删除、拖拽进来新文件等）；  
+    - 维护当前所选图片在 `ResourceManager` 中的索引；  
+    - 监听 `PreviewWidget` 发来的 `overlay_params_changed_signal(overlay_type, data)`；  
+      - 若 `overlay_type == "perspective"`，自动写入 `_verified.txt`；  
+      - 其余模式(sam2等)暂为占位；  
+    - 也会在显示图片时，先尝试加载 `_verified.txt` 或 `.txt` 中的四点坐标，赋予 `image_item`。
+
+  ### **`shape_transform_controller.py`**  
+  - **类**：`ShapeTransformController`  
+  - **功能**：  
+    - **核心的形状变换/角点拖拽逻辑**，不直接依赖 UI；  
+    - 提供 `hit_test_corner()` / `hit_test_midpoint()` 判断命中，以及 `_try_move_corner()` / `_move_midpoint_by_mouse()` 实现链式拖拽；  
+    - 只暴露给 `PerspectiveOverlay`（或其它需要透视变形的 overlay）使用。
+
+  ### **`sync_controller.py`**  
+  - **类**：`SyncController`  
+  - **功能**：  
+    - 负责将“已加载”资源复制到目标文件夹；  
+    - 普通同步 vs 强制同步；  
+    - 冲突时弹出改名 / 跳过 / 忽略后续的对话。
+
+  ### **`settings_controller.py`**  
+  - **类**：`SettingsController`  
+  - **功能**：  
+    - 专门管理 `settings.txt` ；  
+    - 提供读写 “canvas_height”等配置的接口；  
+    - 可导入外部配置文件并覆盖本地设置。
+
+  ### **`resource_manager.py`**  
+  - **类**：`ResourceManager`  
+  - **功能**：  
+    - 记录所有已加载图片（`ImageItem` 列表）；  
+    - 提供增/删/清空/查询等接口。
+
+  ### **`cache_manager.py`**  
+  - **类**：`CacheManager`  
+  - **功能**：  
+    - 在本地创建 `cache`；  
+    - 负责把用户选定的图片（及同名 `.txt` / `_verified.txt`）复制到 `cache`；  
+    - 避免源文件被移动或删除后无法访问。
+
+  ---
+
+  ## 3. `models/` 目录
+
+  ### **`transform_params.py`**  
+  - **类**：`TransformParams`  
+  - **功能**：  
+    - 用于读写“4个角点坐标”到 `.txt` / `_verified.txt`；  
+    - 提供 `load_for_image(...)` 和 `save_to_file(...)` 等静态方法；  
+    - 目前仅存储基础的 4 corners，未来若需要“sam2”、“额外形变”可在此扩展。
+
+  ### **`image_item.py`**  
+  - **类**：`ImageItem`  
+  - **功能**：  
+    - 表示一张图片的基本信息（`image_path` 等）与“角点/中点”数据；  
+    - 提供 `set_corners_from_coords()` 等方法同步到内部 corners；  
+    - 也可缓存 `_verified.txt` 中读到的 “verified_coords”；  
+    - 初始化时默认 4 corners + 4 midpoints，后续可以根据外部加载的参数覆盖。
+
+  ### **`shape_transform.py`**  
+  - **结构/函数**：`CornerPoint`, `MidPoint`, `update_system_fixed_states`, `recalc_midpoint_positions`, `rebuild_midpoints_by_label_order`  
+  - **功能**：  
+    - 定义角点/中点的数据结构与固定状态；  
+    - 提供计算或更新中点坐标、自动约束等通用函数；  
+    - 由 `shape_transform_controller.py`、`image_item.py` 等调用。
+
+  ---
+
+  ## 4. `views/` 目录
+
+  ### **`main_window.py`**  
+  - **类**：`MainWindow`  
+  - **功能**：  
+    - 顶层界面布局：菜单栏、目标文件夹选择器、主预览区域 + 侧边栏；  
+    - 若使用 `QMainWindow`，则可将本 `MainWindow` 作为 centralWidget。  
+    - 提供菜单项（加载文件/文件夹、保存/强制同步、加载配置、关闭程序等），点击后由 `MainController` 捕捉执行。
+
+  ### **`preview_widget.py`**  
+  - **类**：`PreviewWidget`  
+  - **功能**：  
+    - 通过内部的 `PreviewLabel` 负责图像展示与滚轮缩放；  
+    - 提供一个 `QComboBox` 下拉菜单 **overlay_mode_selector**，对应 4 种标记模式：  
+      1. 不加载标记 (none)  
+      2. 加载透视变形参数 (perspective)  
+      3. 加载SAM2分割遮罩 (sam2)  
+      4. 根据SAM2分割遮罩回归透视 (sam2_to_persp)  
+    - 当模式切换时，会在 `PreviewLabel` 中设置不同的“Overlay”对象(见下述 `overlays`)。  
+    - 按钮区包含： “上一张/下一张”、保存按钮(仅在 `perspective` 模式下可点击)、缩略图栏(`ThumbnailBar`)；  
+    - 发射信号：`overlay_params_changed_signal(overlay_type, data)`，在用户拖拽或手动保存时通知外部（`PreviewController`）。  
+    - 拖拽进来的文件会通过 `file_dropped` 信号传给外部。
+
+  ### **`side_panel.py`**  
+  - **类**：`SidePanel`  
+  - **功能**：  
+    - 包含若干滑动条和开关，用于设置线条颜色、线条粗细、画布高度等；  
+    - `canvas_height_changed(int)` 用于通知外部更新预期的预览尺寸；  
+    - 由 `MainController` 或其他控制器侦听此信号并写入 `settings.txt`。
+
+  ### **`folder_selector.py`**  
+  - **类**：`FolderSelector`  
+  - **功能**：  
+    - 显示目标文件夹图标和当前路径；  
+    - 允许用户点击以更改文件夹；  
+    - 选定后发射 `folder_selected(str)` 信号给外部。
+
+  ### **`thumbnail_bar.py`**  
+  - **类**：`ThumbnailBar`  
+  - **功能**：  
+    - 水平滚动条列出缩略图，可左键点击、右键“移除图片”；  
+    - 点击时发射 `thumbnail_clicked(index)`，移除发射 `thumbnail_removed(index)`；  
+    - 由 `PreviewController` 响应并切换/删除对应的 `ImageItem`.
+
+  ### **`overlays/` 子目录**  
+
+  #### `perspective_overlay.py`  
+  - **类**：`PerspectiveOverlay`  
+  - **功能**：  
+    - 专门用于“透视变形”模式下的叠加绘制与鼠标交互；  
+    - 内部**组合**一个 `ShapeTransformController`，并在鼠标事件中调用其 `_try_move_corner()` / `_move_midpoint_by_mouse()` 等逻辑；  
+    - 在 `paint_overlay()` 中画出四角点、四中点及连线；  
+    - 当用户释放拖拽后，若坐标有改变，就发射 `overlay_params_changed_signal("perspective", coords)` 给外部。
+
+  > 若将来需要 “加载SAM2分割遮罩” 或 “根据SAM2分割遮罩回归透视” 的叠加层，可新增类似的 `Sam2Overlay.py`, `Sam2ToPerspectiveOverlay.py` 等类，与之并行即可。
+
+  ---
+
+  # 四、典型使用流程
+
+  1. **启动**:  
+    - 运行 `python main.py` => 初始化并打开主窗口。
+
+  2. **加载图片**:  
+    - 菜单 “文件”->“加载文件”或“加载整个文件夹”，或者拖拽图片进预览区。  
+    - `CacheManager` 会将图片及相关 `.txt` 复制到 `cache`；`ResourceManager` 记录这些图片；  
+    - `PreviewController` 刷新缩略图并展示第一张图。
+
+  3. **切换标记模式**:  
+    - 在 `PreviewWidget` 的下拉菜单中选择：  
+      - “不加载标记 (none)”：只看图  
+      - “加载透视变形参数 (perspective)”：可显示4角点 + 4中点，并拖拽校正。  
+      - “加载SAM2分割遮罩 (sam2)”：后续实现，当前无实际功能  
+      - “根据SAM2分割遮罩回归透视 (sam2_to_persp)”：后续实现，当前无实际功能  
+
+  4. **透视校正**(在 `perspective` 模式):  
+    - 拖拽角点或中点，`ShapeTransformController` 会自动进行链式约束；  
+    - 右键可固定/取消固定角点/中点或改变 label；  
+    - 放大缩小或调节“画布高度”都会相应改变预览尺寸。
+
+  5. **保存**:  
+    - 若在 `perspective` 模式中手动或拖拽完毕，`PreviewController` 会将最新坐标写入 `_verified.txt`；  
+    - 侧边栏/菜单项还可触发“保存到目标文件夹”、“强制同步”，由 `SyncController` 统一处理。
+
+  6. **退出**:  
+    - 关闭程序时，会出现 5 按钮对话框：“强制同步”“保存到目标文件夹”“更改目标文件夹”“不保存”“取消”。  
+    - 用户选择后程序做相应操作并退出或取消退出。
+
+  ---
+
+  # 五、后续查询
+
+  - 想了解更详细的类/函数实现，可在 `details/` 或对应目录下查看：  
+    - `shape_transform_controller.py.txt`  
+    - `perspective_overlay.py.txt`  
+    - `preview_widget.py.txt`  
+    - 等等  
+  - 每个 `.txt` 文件往往包含方法参数、返回值、使用案例说明，协助新团队扩展功能。  
+  - 若需要实现新的标记模式，如“sam2”之类，只需像 `PerspectiveOverlay` 一样编写相应的 Overlay 类，并在 `PreviewWidget` 的模式切换处注入即可。
+
+  ---
+
+  本说明文档供你快速了解项目中各**模块的分工**和**交互方式**。它已同步了最新的“多模式标记 + Overlay 架构”的改动；如需更深入的细节或想了解 `sam2` 等未完成的功能，请再结合具体源码或 `.txt` 文档查看。祝开发顺利!

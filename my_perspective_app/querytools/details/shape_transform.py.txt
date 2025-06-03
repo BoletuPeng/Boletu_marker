@@ -1,0 +1,52 @@
+
+
+
+---
+
+## **`shape_transform.py` 详细说明**
+
+**文件路径**: `my_perspective_app/models/shape_transform.py`
+
+### 1. 概述
+
+`shape_transform.py` 定义了“**角点 (CornerPoint) + 中点 (MidPoint)**”两类数据结构以及**相关的固定状态**（用户固定 / 系统固定），并提供一些工具函数来**更新系统固定**、**重算中点**、**根据 label 重建连线**等。它在项目中**扮演模型层**的角色。
+
+### 2. 类与函数
+
+#### **`class CornerPoint`**
+- **成员**:  
+  - `x_rel`, `y_rel`: 在图像坐标系统中的相对坐标（通常 0..1）。  
+  - `label`: 整数，表示其顺序或标号。  
+  - `userFixed`, `systemFixed`: 布尔值，分别表示用户固定 / 系统固定。  
+- **`is_fixed`** (property): `return self.userFixed or self.systemFixed`。
+
+#### **`class MidPoint`**
+- **成员**:  
+  - `corner1_idx`, `corner2_idx`: 分别指向所属的两个 CornerPoint 在列表中的索引；  
+  - `x_rel`, `y_rel`: 同样是相对坐标；  
+  - `userFixed`, `systemFixed`;  
+- **`is_fixed`** (property): 同上。
+
+---
+
+#### `update_system_fixed_states(corners, midpoints, max_iter=10)`
+- **作用**: 迭代式更新“systemFixed”状态。  
+- **逻辑示例**:  
+  - 若某角点未被用户固定，但它与一个 userFixed 的中点相连、且另一端角点已 fixed，则将此角点设为 systemFixed。  
+  - 若某中点未被用户固定，但它两端角点都 is_fixed，则此中点也 systemFixed。  
+  - 重复迭代，直到稳定或达到 max_iter。
+
+#### `recalc_midpoint_positions(corners, midpoints)`
+- **作用**: 对**未 userFixed** 的中点，将其坐标设为 `(corner1 + corner2)/2`。  
+- **用途**: 在角点被移动后，需要刷新各中点位置（若中点不固定）。
+
+#### `rebuild_midpoints_by_label_order(corners, midpoints)`
+- **作用**: 根据角点的 label 升序，重新定义 midpoints 的连线关系 (0->1, 1->2, 2->3, 3->0)；然后强制更新中点坐标、再 `update_system_fixed_states`。  
+- **适用**: 当某角点更换了 label 后，需要 midpoints 跟随更新。
+
+---
+
+### 3. 使用建议
+
+- 该文件**不**处理任何 UI 逻辑，只关注数据结构及系统固定状态的更新；  
+- `ShapeTransformController` 或其它控制器在修改角点/中点后，可调用这些函数以保持数据一致性（如 `recalc_midpoint_positions`、`update_system_fixed_states` 等）。
